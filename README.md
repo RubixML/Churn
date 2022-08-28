@@ -1,4 +1,5 @@
 # Rubix ML - Customer Churn Predictor
+Detect unhappy customers with Naive Bayes and 19 categorical features.
 
 - **Difficulty:** Easy
 - **Training time:** Seconds
