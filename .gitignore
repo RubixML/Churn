@@ -1,0 +1,9 @@
+/vendor
+composer.lock
+report.json
+model.rbx
+*.old
+Thumbs.db
+.DS_Store
+.vscode
+.vs
