@@ -3,8 +3,9 @@
 include __DIR__ . '/vendor/autoload.php';
 
 use Rubix\ML\Loggers\Screen;
-use Rubix\ML\Datasets\Labeled;
 use Rubix\ML\Extractors\CSV;
+use Rubix\ML\Extractors\ColumnPicker;
+use Rubix\ML\Datasets\Labeled;
 use Rubix\ML\Transformers\IntervalDiscretizer;
 use Rubix\ML\Transformers\NumericStringConverter;
 use Rubix\ML\PersistentModel;
@@ -12,7 +13,6 @@ use Rubix\ML\Classifiers\NaiveBayes;
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
 use Rubix\ML\CrossValidation\Reports\ConfusionMatrix;
 use Rubix\ML\CrossValidation\Reports\MulticlassBreakdown;
-use Rubix\ML\Extractors\ColumnPicker;
 use Rubix\ML\Persisters\Filesystem;
 
 ini_set('memory_limit', '-1');
@@ -22,9 +22,9 @@ $logger = new Screen();
 $logger->info('Loading data into memory');
 
 $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
-    "gender", "SeniorCitizen", "Partner", "Dependents", "tenure", "PhoneService", "MultipleLines",
-    "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport",
-    "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod",
+    "Gender", "SeniorCitizen", "Partner", "Dependents", "MonthsInService", "Phone",
+    "MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection",
+    "TechSupport", "TV", "Movies", "Contract", "PaperlessBilling", "PaymentMethod",
     "MonthlyCharges", "TotalCharges", "Churn",
 ]);
 
@@ -34,27 +34,36 @@ $dataset = Labeled::fromIterator($extractor)
 
 [$training, $testing] = $dataset->stratifiedSplit(0.8);
 
-$estimator = new NaiveBayes();
+$estimator = new NaiveBayes([
+    "Yes" => 0.05,
+    "No" => 0.95,
+]);
 
 $estimator->train($training);
-
-$report = new AggregateReport([
-    new MulticlassBreakdown(),
-    new ConfusionMatrix(),
-]);
 
 $logger->info('Making predictions');
 
 $predictions = $estimator->predict($testing);
 
-$results = $report->generate($predictions, $testing->labels());
+$reportGenerator = new AggregateReport([
+    new MulticlassBreakdown(),
+    new ConfusionMatrix(),
+]);
 
-echo $results;
+$logger->info('Generating report');
 
-$results->toJSON()->saveTo(new Filesystem('report.json'));
+$report = $reportGenerator->generate($predictions, $testing->labels());
+
+echo $report;
+
+$report->toJSON()->saveTo(new Filesystem('report.json'));
 
 $logger->info('Report saved to report.json');
 
 $estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
 
-$estimator->save();
+if (strtolower(readline('Save this model? (y|[n]): ')) === 'y') {
+    $estimator->save();
+
+    $logger->info('Model saved to model.rbx');
+}
