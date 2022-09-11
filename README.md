@@ -43,9 +43,9 @@ use Rubix\ML\Datasets\Labeled;
 $dataset = Labeled::fromIterator($extractor);
 ```
 
-The learning algorithm that we’re going to explore today is a classifier called Naive Bayes. It is a relatively simple algorithm that uses counting and Bayes' Theorem to derive the conditional probability of an outcome given a set of categorical features. The term “naive” is in reference to the algorithm’s feature independence assumption which avoids having to account for interactions between features. It's naive because, in the real world, most features have some interactions. However, in practice, this feature independence assumption turns out to be a benefit in many cases.
+The learning algorithm that we’re going to explore today is a classifier called Naive Bayes. It is a relatively simple algorithm that uses counting and Bayes' Theorem to derive the conditional probability of an outcome given a set of categorical features. The term “naive” is in reference to the algorithm’s feature independence assumption which avoids having to account for interactions between features. It's naive because, in the real world, most features have some interactions. However, in practice, this feature independence assumption turns out not to be a problem and actually a benefit in some cases.
 
-Since all values in CSV format are interpreted as strings by default, we'll apply a preprocessing step that converts the numeric strings in the dataset to their integer and floating point representations. For this we'll use a dataset Transformer called NumericStringaConverter applied to the entire dataset in one go. In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` all have numerical values. In addition, since Naive Bayes is only compatible with categorical type features, we'll also apply IntervalDiscretizer set to derive 3 discrete categories or "levels" from all the continuous features in the dataset. In the context of the `MonthsInService` feature, you can think of this process as converting the number of months the customer has been in service to one of three discrete categories - "short", "medium", or "long."
+In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` feature columns have numerical values. Since all values in CSV format are interpreted as strings by default, we'll apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their integer and floating point representations. For this, we'll use a  Transformer called Numeric String Converter applied to the entire dataset in one go. In addition, since Naive Bayes is only compatible with categorical type features, we'll also apply an Interval Discretizer which is set to derive 3 discrete categories or "levels" from the aforementioned continuous features in the dataset. In the context of the `MonthsInService` feature, you can think of this process as converting the number of months the customer has been in service to one of three discrete categories - "short", "medium", or "long."
 
 ```php
 use Rubix\ML\Transformers\NumericStringConverter;
@@ -55,13 +55,13 @@ $dataset->apply(new NumericStringConverter())
     ->apply(new IntervalDiscretizer(3));
 ```
 
-With our dataset already prepared, the next thing we'll do is create two subsets to be used for training and validation purposes. The training set will be used by Naive Bayes during training while the testing set will be used to measure the model's accuracy after training. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later. We use different samples to train the model than to validate it because we want to test the learner on samples it has never seen before.
+With our dataset already prepared, the next thing we'll do is create two subsets to be used for training and validation purposes. The training set will be used by Naive Bayes during training to learn a model while the testing set will be used to gauge the model's accuracy after training. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later. We use different samples to train the model than to validate it because we want to test the learner on samples it has never seen before.
 
 ```php
 [$training, $testing] = $dataset->stratifiedSplit(0.8);
 ```
 
-Now, we can instantiate our Naive Bayes estimator with a set of parameters (called "hyper-parameters" in ML terms) that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we should be aware of. The `priors` hyper-parameter allows us to specify the class prior probabilities instead of the default which is to calculate the prior probabilities from the training set. For example, if we know that our average churn rate is about 5% then we can specify that and the learner will adapt its predictions accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature. Smoothing is a form of regularization that prevents the model from being too "sure of itself" especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter as the default value of 1.0. Feel free to play around with these settings to see how they effect the accuracy of the trained model.
+Now, we can instantiate our Naive Bayes estimator with a set of parameters (called "hyper-parameters") that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we should be aware of. The `priors` parameter allows the user to specify the class prior probabilities (i.e. the probability that a particular class will be the outcome if chosen randomly) instead of the default which is to calculate the prior probabilities using the distribution of the training set. For example, if we know that our average churn rate is about 5% in real life, then we can specify that as the `"Yes"` class prior probability and Naive Bayes will adapt accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature calculated during training. Smoothing is a form of regularization that prevents the model from being too "sure of itself" especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter as the default value of 1.0. Feel free to play around with these settings to see how they effect the accuracy of the trained model.
 
 ```php
 use Rubix\ML\Classifiers\NaiveBayes;
@@ -72,17 +72,38 @@ $estimator = new NaiveBayes([
 ]);
 ```
 
-To train, pass the training dataset object to the newly instantiated Naive Bayes estimator while calling the `train()` method.
+To train the model, pass the training dataset object to the newly instantiated Naive Bayes estimator by calling the `train()` method. Under the hood, the learning algorithm builds a model with parameters consisting of the conditional probabilities of each possible class outcome given a particular feature. Since we're dealing with discrete (categorical) features and outcomes, the algorithm calculates these probabilities by counting the number of instances of each category and then dividing over the total number of samples to obtain the probability density. 
 
 ```php
 $estimator->train($training);
 ```
 
-With the model trained, we now turn our attention to determining the accuracy of the model using the "holdout" method described above. 
+Then, to return a set of predictions from the testing set, pass it to the `predict()` method on the estimator after it has been trained. The class predictions are determined by taking the class that returns the highest probability when presented with a particular testing sample. The class probabilities are calculated by combining each of the conditional probabilities for a sample with the class prior probabilities using Bayes' Theorem.
 
 ```php
 $predictions = $estimator->predict($testing);
 ```
+
+With the test predictions and their ground-truth labels in hand, we can now turn our attention to measuring the accuracy of the model using the "holdout" method described above. We're looking for a model that can generalize its training to new samples. The method we use to determine generalization performance is called cross-validation and the holdout method is one of the most straightforward approaches. The holdout method is named as such because a certain percentage of the dataset is "held out" for testing purposes. The upside to this method is that it's quick to perform and only requires one model to be trained to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only computed using a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time.
+
+The Rubix ML library provides an entire subsystem dedicated to cross-validation. In this example, we're going to score the model using a simple Accuracy metric and then generate and save a JSON report that has more detailed metrics. First, instantiate the Accuracy metric by calling its constructor. Then, pass the array containing the test predictions along with their ground-truth labels to the `score()` method. The return value is a scalar that we'll output to the terminal right after it's calculated.
+
+```php
+use Rubix\ML\CrossValidation\Metrics\Accuracy;
+
+$metric = new Accuracy();
+
+$score = $metric->score($predictions, $testing->labels());
+
+echo $score;
+```
+
+```sh
+0.77998580553584
+```
+
+Next, we're going to generate a couple reports using the same test predictions and their corresponding ground-truth labels. In this case, we'll instantiate both Multiclass Breakdown and Confusion Matrix report generators and wrap them in an Aggregate Report so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on both an overall and per-class basis. Confusion Matrix is a table that pairs the predictions on one axis and their ground-truth on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
+
 
 ```php
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
@@ -93,15 +114,104 @@ $reportGenerator = new AggregateReport([
     new MulticlassBreakdown(),
     new ConfusionMatrix(),
 ]);
-```
 
-```php
 $report = $reportGenerator->generate($predictions, $testing->labels());
+```
 
-echo $report;
+```json
+[
+    {
+        "overall": {
+            "accuracy": 0.7799858055358411,
+            "balanced accuracy": 0.73583146038389,
+            "f1 score": 0.7273674880782962,
+            "precision": 0.7209892323185374,
+            "recall": 0.73583146038389,
+            "specificity": 0.73583146038389,
+            "negative predictive value": 0.7209892323185374,
+            "false discovery rate": 0.27901076768146255,
+            "miss rate": 0.2641685396161099,
+            "fall out": 0.2641685396161099,
+            "false omission rate": 0.27901076768146255,
+            "mcc": 0.4565795150323564,
+            "informedness": 0.47166292076778005,
+            "markedness": 0.4419784646370748,
+            "true positives": 1099,
+            "true negatives": 1099,
+            "false positives": 310,
+            "false negatives": 310,
+            "cardinality": 1409
+        },
+        "classes": {
+            "No": {
+                "accuracy": 0.7799858055358411,
+                "balanced accuracy": 0.73583146038389,
+                "f1 score": 0.8471400394477318,
+                "precision": 0.865055387713998,
+                "recall": 0.8299516908212561,
+                "specificity": 0.6417112299465241,
+                "negative predictive value": 0.5769230769230769,
+                "false discovery rate": 0.13494461228600196,
+                "miss rate": 0.17004830917874392,
+                "fall out": 0.3582887700534759,
+                "false omission rate": 0.42307692307692313,
+                "informedness": 0.47166292076778005,
+                "markedness": 0.4419784646370748,
+                "mcc": 0.4565795150323564,
+                "true positives": 859,
+                "true negatives": 240,
+                "false positives": 134,
+                "false negatives": 176,
+                "cardinality": 1035,
+                "proportion": 0.7345635202271115
+            },
+            "Yes": {
+                "accuracy": 0.7799858055358411,
+                "balanced accuracy": 0.73583146038389,
+                "f1 score": 0.6075949367088607,
+                "precision": 0.5769230769230769,
+                "recall": 0.6417112299465241,
+                "specificity": 0.8299516908212561,
+                "negative predictive value": 0.865055387713998,
+                "false discovery rate": 0.42307692307692313,
+                "miss rate": 0.3582887700534759,
+                "fall out": 0.17004830917874392,
+                "false omission rate": 0.13494461228600196,
+                "informedness": 0.47166292076778005,
+                "markedness": 0.4419784646370748,
+                "mcc": 0.4565795150323564,
+                "true positives": 240,
+                "true negatives": 859,
+                "false positives": 176,
+                "false negatives": 134,
+                "cardinality": 374,
+                "proportion": 0.2654364797728886
+            }
+        }
+    },
+    {
+        "No": {
+            "No": 859,
+            "Yes": 134
+        },
+        "Yes": {
+            "No": 176,
+            "Yes": 240
+        }
+    }
+]
 ```
 
 ```php
+use Rubix\ML\Persisters\Filesystem;
+
+$report->toJSON()->saveTo(new Filesystem('report.json'));
+```
+
+```php
+use Rubix\ML\PersistentModel;
+use Rubix\ML\Persisters\Filesystem;
+
 $estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
 
 $estimator->save();

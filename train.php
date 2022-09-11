@@ -10,6 +10,7 @@ use Rubix\ML\Transformers\IntervalDiscretizer;
 use Rubix\ML\Transformers\NumericStringConverter;
 use Rubix\ML\PersistentModel;
 use Rubix\ML\Classifiers\NaiveBayes;
+use Rubix\ML\CrossValidation\Metrics\ProbabilisticAccuracy;
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
 use Rubix\ML\CrossValidation\Reports\ConfusionMatrix;
 use Rubix\ML\CrossValidation\Reports\MulticlassBreakdown;
@@ -41,7 +42,15 @@ $estimator = new NaiveBayes([
 
 $estimator->train($training);
 
-$logger->info('Making predictions');
+$probabilities = $estimator->proba($testing);
+
+$metric = new ProbabilisticAccuracy();
+
+$score = $metric->score($probabilities, $testing->labels());
+
+$logger->info("Model is $score accurate");
+
+$logger->info('Generating report');
 
 $predictions = $estimator->predict($testing);
 
@@ -50,11 +59,7 @@ $reportGenerator = new AggregateReport([
     new ConfusionMatrix(),
 ]);
 
-$logger->info('Generating report');
-
 $report = $reportGenerator->generate($predictions, $testing->labels());
-
-echo $report;
 
 $report->toJSON()->saveTo(new Filesystem('report.json'));
 
