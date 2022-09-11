@@ -78,7 +78,7 @@ To train, pass the training dataset object to the newly instantiated Naive Bayes
 $estimator->train($training);
 ```
 
-Next, we'll make the predictions on the testing set so we can determine the accuracy of the model by comparing them to their known ground-truth labels.
+With the model trained, we now turn our attention to determining the accuracy of the model using the "holdout" method described above. 
 
 ```php
 $predictions = $estimator->predict($testing);
