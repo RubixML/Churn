@@ -102,7 +102,7 @@ bool(true)
 
 To better understand what happened when we called the `train()` method let's peak under the hood of the Naive Bayes algorithm for a brief moment. The first thing the algorithm did was build a histogram for each feature for a particular class outcome by counting the number of times a category appeared in the training data. The algorithm then calculates the conditional probabilities for each category from the histogram by dividing the counts over the sample size. The algorithm repeats this process for every categorical feature in the dataset. Later, we'll demonstrate how these conditional probabilities are combined to produce the overall probability of a class outcome. In the example below, we see the histograms of the `Region` feature. Notice that customer with service in the East region were more likely to churn than other regions.
 
-![Region Histograms](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/region-histograms.png)
+![Region Histograms](https://raw.githubusercontent.com/RubixML/Churn/article/docs/images/region-histograms.png)
 
 ### Making Test Predictions
 
@@ -131,7 +131,7 @@ Array
 
 Under the hood, the Naive Bayes algorithm combines the prior probability with the conditional probabilities of the unknown sample for each possible class and then predicts the class with the highest posterior probability. The following formula denotes the decision function that Naive Bayes uses to make a class prediction where `p(Ck)` is the class prior probability given as a hyper-parameter in this case and `p(xi | Ck)` is the conditional probability of class `Ck` given feature `xi` that was calculated during training.
 
-![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/naive-bayes-decision-function.png)
+![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/article/docs/images/naive-bayes-decision-function.png)
 
 Although this formula accurately represents the high-level Naive Bayes decision function, the actual calculation in Rubix ML is done in logarithmic space. Since very low probabilities have a tendency to become unstable when multiplied together, log probabilities offer greater numerical stability by converting the products in the original formula to a summations.
 
