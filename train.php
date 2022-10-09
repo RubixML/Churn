@@ -32,11 +32,13 @@ $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
 
 $dataset = Labeled::fromIterator($extractor);
 
+echo $dataset->apply(new NumericStringConverter())->describeByLabel();
+
 [$training, $testing] = $dataset->stratifiedSplit(0.8);
 
 $estimator = new NaiveBayes([
-    "Yes" => 0.05,
-    "No" => 0.95,
+    'Yes' => 0.05,
+    'No' => 0.95,
 ]);
 
 $estimator = new Pipeline([
@@ -65,9 +67,9 @@ $report->toJSON()->saveTo(new Filesystem('report.json'));
 
 $logger->info('Report saved as report.json');
 
-$estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
-
 if (strtolower(readline('Save this model? (y|[n]): ')) === 'y') {
+    $estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
+
     $estimator->save();
 
     $logger->info('Model saved as model.rbx');

@@ -14,13 +14,18 @@ $ composer create-project rubix/churn
 - [PHP](https://php.net) 7.4 or above
 
 ## Tutorial
-In traditional programming, developers are responsible for coding the behavior of a program. Machine Learning is a paradigm shift from traditional programming because it allows the system itself to write and rewrite parts of its program through training and data. For this reason, you can think of Machine Learning as “programming with data.” Integrating ML into your projects is therefore a practice of merging logic written by developers with logic that was learned by a Machine Learning algorithm. Today, we’ll talk about how you can start integrating Machine Learning in your PHP projects using the open-source Rubix ML library. We’ll formulate the problem of customer churn, train a model to predict unhappy customers, and then use that model to identify the potentially unhappy customers within our database.
 
-Let’s start by introducing the problem of customer churn i.e. the rate at which your customers will discontinue use of your product or service over a period of time. If we could detect which of our customers are most likely to stop using our product, then we could take action to try to repair the relationship before the customer has already decided to leave. But, how do we as developers encode the ruleset i.e. the “business logic” that determines what an unhappy customer looks like?
+### Introduction
 
-Let's imagine for this example that we are running a telecommunications business. One thing we could do is we could ask our customer service department what customers say about our service. We might learn that our customers who live in a certain region were more likely to complain of slow Internet speed. We could then look for other Internet service customers in that area and assign a higher probability that they’ll cancel our service in the future. We might also learn that older customers were really happy with our streaming TV and movie selection and were therefore more likely to hold onto their subscription. We *could* start by encoding these rules out by hand, but this quickly becomes overwhelming when we consider all the different factors that contribute to overall customer satisfaction. Instead, we can feed examples of both satisfied and dissatisfied customers into a learning algorithm and have it learn the rules automatically. Then, we can take the model we trained and use it to make predictions about the customers in our database.
+Machine Learning is a paradigm shift from traditional programming because it allows the software itself to modify its programming through training and data. For this reason, you can think of Machine Learning as “programming with data.” Integrating ML into your project is therefore a practice of merging logic written by developers with logic that was learned by a Machine Learning algorithm. Today, we’ll talk about how you can start integrating Machine Learning models into your PHP projects using the open-source Rubix ML library. We’ll formulate the problem of customer churn prediction, train a model to identify what an unhappy customer looks like, and then use that model to detect the unhappy customers within our database.
 
-Before we begin training our model, we need to gather up all the samples of both satisfied and dissatisfied customers that we know about and label them accordingly. Then we'll determine which features of a customer aid in determining whether or not a customer becomes dissatisfied. For example, features such as age or how many times the customer called for tech support are probably good features to include in the dataset, but features such as eye color and whether or not the customer has a back yard are probably just noise in this case and may be counterproductive to include them. In the example below, we'll load the samples from the provided example dataset using the CSV extractor and then choose a subset of the features using the ColumnPicker. In Rubix ML, Extractors are iterators that stream data from storage into memory and can be wrapped by other iterators to modify the data in-flight. Note that we've included the label for each sample as the last column of the data table.
+Let’s start by introducing the problem of predicting customer churn. Churn rate is the rate at which customers discontinue use of a product or service over a period of time. If we could predict which of our customers are most likely to leave, then we could take action to try to repair the relationship before they are gone. But, how do we as developers encode the ruleset i.e. the “business logic” that determines what an unhappy customer looks like?
+
+Imagine that you are a developer working at a telecommunications company tasked with optimizing customer churn. One thing you could do is ask the customer service department what customers say about the service. You might learn that our customers who live in a certain region were more likely to complain of slow Internet speed and discontinue their service. You might also learn that older customers were really happy with the streaming TV and movie selection and were therefore more likely to hold onto their subscription. You *could* start by encoding these rules out by hand, but this quickly becomes overwhelming when you consider all the different factors that contribute to customer satisfaction. Instead, we can feed samples of both satisfied and unsatisfied customers through a learning algorithm and have the learner learn the rules automatically. Then, we can take that model and use it to make predictions about the customers in our database.
+
+### Preparing the Dataset
+
+Before training the model, we need to gather the samples of satisfied and unsatisfied customers and label them accordingly. Then, we'll determine which features of a customer are beneficial in determining whether or not a customer will churn. For example, service region and the number of times the customer called for tech support are probably good features to include in the dataset, but features such as eye color and whether or not the customer has a back yard or not may be counterproductive to include them. In the example below, we'll load the samples from the provided example dataset using the CSV extractor and then select a subset of the features using the ColumnPicker. In Rubix ML, Extractors are iterators that stream data from storage into memory and can be wrapped by other iterators to modify the data in-flight. Note that we've included the label for each sample as the last column of the data table as is the convention.
 
 
 ```php
@@ -35,7 +40,7 @@ $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
 ]);
 ```
 
-In Rubix ML, dataset objects provide a high-level API that allows you to process the data and create subsets among other things. Next, we'll instantiate a Labeled dataset object by passing the extractor to the static `fromIterator()` method. This process reads the samples from our dataset into memory.
+In Rubix ML, dataset objects provide a high-level API that allow you to process the samples and create subsets among other things. Next, we'll instantiate a Labeled dataset object by passing the extractor object to the static `fromIterator()` method.
 
 ```php
 use Rubix\ML\Datasets\Labeled;
@@ -43,15 +48,17 @@ use Rubix\ML\Datasets\Labeled;
 $dataset = Labeled::fromIterator($extractor);
 ```
 
-The next thing we'll do is create two subsets of the dataset to be used for training and testing purposes. The training set will be used by Naive Bayes during training to learn a model while the testing set will be used to gauge the model's accuracy after training. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later. We use different samples to train the model than to validate it because we want to test the learner on samples it has never seen before.
+The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Naive Bayes to learn a model and the testing set will be used to gauge the model's accuracy after training. By stratifying the samples by label before splitting them into subsets, we ensure that the class proportions are maintained in both subsets. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later. Note that we use different samples to train the model than to validate it because we want to test the learner on samples it has never seen before.
 
 ```php
 [$training, $testing] = $dataset->stratifiedSplit(0.8);
 ```
 
-The learning algorithm that we’re going to showcase today is a classifier called Naive Bayes. It is a relatively simple algorithm that uses counting and Bayes' Theorem to derive the conditional probabilities of an outcome given a sample consisting of categorical features. The term “naive” is in reference to the algorithm’s feature independence assumption. It's naive because, in the real world, most features have some interactions. In practice however, this assumption turns out not to be a big problem and is actually a benefit in some cases.
+### Training the Model
 
-We can instantiate our Naive Bayes estimator with a set of parameters (called "hyper-parameters") that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we should be aware of. The `priors` parameter allows the user to specify the class prior probabilities (i.e. the probability that a particular class will be the outcome if chosen randomly) instead of the default which is to calculate the prior probabilities from the distribution in the training set. For example, if we know that our average churn rate is about 5% in real life, then we can specify that as the `"Yes"` class's prior probability and Naive Bayes will adapt accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature calculated during training. Smoothing is a form of regularization that prevents the model from being too "sure of itself" especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter as the default value of 1.0. Feel free to play around with these settings to see how they effect the accuracy of the trained model.
+Naive Bayes is an algorithm that uses counting and Bayes' Theorem to derive the conditional probabilities of a label given a sample consisting of only categorical features. The term “naive” is in reference to the algorithm’s feature independence assumption. It's naive because, in the real world, most features have interactions. In practice however, this assumption turns out not to be such a big problem.
+
+To instantiate our Naive Bayes estimator we need to call the constructor with a set of parameters (called "hyper-parameters") that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we need to be aware of. The `priors` argument allows the user to specify the class prior probabilities (i.e. the probability that a particular class will be the outcome if chosen randomly) instead of the default which is to calculate the prior probabilities from the training set. For example, if we know that our average churn rate is about 5% in real life, then we can specify that as the `"Yes"` class's prior probability and Naive Bayes will make predictions accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature calculated during training. Smoothing is a form of regularization that prevents the model from being overconfident especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter set at the default value of 1.0 but feel free to experiment with these settings on your own to see how they effect the accuracy of the model.
 
 ```php
 use Rubix\ML\Classifiers\NaiveBayes;
@@ -62,7 +69,9 @@ $estimator = new NaiveBayes([
 ]);
 ```
 
-In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` feature columns have numerical values. Since all values in CSV format are interpreted as strings by default, we'll apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their integer and floating point representations. For this, we'll use a handy Transformer called Numeric String Converter applied to the entire dataset in one go. In addition, since Naive Bayes is only compatible with categorical features, we'll also apply an Interval Discretizer set to derive 3 discrete categories or "levels" from the aforementioned continuous features in the dataset. In the context of the `MonthsInService` feature, you can think of this transformation as converting the number of months the customer has been in service to one of three discrete categories - "short", "medium", or "long." We'll wrap our Naive Bayes estimator in the Pipeline meta-Estimator and add both Transformers to the list of preprocessing steps to apply to the dataset. This way, datasets will automatically be preprocessed before training and inference. In addition, by wrapping both the dataset transformers and the estimator we can save both the transformer fittings as well as the model parameters as one object.
+In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` features all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their integer and floating point representations. For this, we'll apply a stateless Transformer called [Numeric String Converter](https://docs.rubixml.com/2.0/transformers/numeric-string-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://docs.rubixml.com/2.0/transformers/interval-discretizer.html) to derive 3 discrete categories or "levels" from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three discrete categories - "short", "medium", or "long."
+
+We'll wrap the entire series of transformations as well as the Naive Bayes estimator in a [Pipeline](https://docs.rubixml.com/2.0/pipeline.html) meta-Estimator to automatically fit and preprocess the dataset before training or inference. Fitting a transformer is analogous to training a learner and by wrapping both the transformers and estimator we can save both the transformer fittings as well as the model parameters as one atomic object.
 
 ```php
 use Rubix\ML\Pipeline;
@@ -75,13 +84,13 @@ $estimator = new Pipeline([
 ], $estimator);
 ```
 
-To train the model and fit the transformers, pass the training dataset object to the newly instantiated Pipeline  meta-Estimator by calling the `train()` method. Under the hood, the dataset is transformed and then the learning algorithm builds a model with parameters consisting of the conditional probabilities of each possible class outcome given a particular feature.
+Now we're ready to fit the transformers and train the model by passing the training dataset to the newly instantiated Pipeline meta-Estimator. 
 
 ```php
 $estimator->train($training);
 ```
 
-We can verify that the estimator has been trained by calling the `trained()` method on the Estimator interface.
+We can verify that the learner has been trained by calling the `trained()` method on the Estimator interface.
 
 ```php
 var_dump($estimator->trained());
@@ -91,7 +100,13 @@ var_dump($estimator->trained());
 bool(true)
 ```
 
-To return the set of predictions, pass the testing dataset object to the `predict()` method on the estimator after it has been trained. The class predictions are determined by outputting the class that returns the highest probability when presented with a particular testing sample.
+To better understand what happened when we called the `train()` method let's peak under the hood of the Naive Bayes algorithm for a brief moment. The first thing the algorithm did was build a histogram for each feature for a particular class outcome by counting the number of times a category appeared in the training data. The algorithm then calculates the conditional probabilities for each category from the histogram by dividing the counts over the sample size. The algorithm repeats this process for every categorical feature in the dataset. Later, we'll demonstrate how these conditional probabilities are combined to produce the overall probability of a class outcome. In the example below, we see the histograms of the `Region` feature. Notice that customer with service in the East region were more likely to churn than other regions.
+
+![Region Histograms](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/region-histograms.png)
+
+### Making Test Predictions
+
+We're going to need to generate some test predictions for the validation step in the process. The operation of making predictions is referred to as "inference" in Machine Learning terms because it involves taking an unlabeled sample and inferring its label. To return a set of predictions, pass the testing dataset to the `predict()` method on the estimator after it has been trained.
 
 ```php
 $predictions = $estimator->predict($testing);
@@ -114,9 +129,17 @@ Array
 )
 ```
 
-With the test predictions and their ground-truth labels in hand, we can now turn our focus to testing the model using the "holdout" method described above. We're looking for a model that can generalize its training to new samples. The method we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The holdout technique is named as such because a certain percentage of the dataset is "held out" for testing purposes. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. The Rubix ML library provides an entire subsystem dedicated to cross-validation. In the next example, we're going to generate and save a JSON report that contains detailed metrics for us to measure the accuracy of the model.
+Under the hood, the Naive Bayes algorithm combines the prior probability with the conditional probabilities of the unknown sample for each possible class and then predicts the class with the highest posterior probability. The following formula denotes the decision function that Naive Bayes uses to make a class prediction where `p(Ck)` is the class prior probability given as a hyper-parameter in this case and `p(xi | Ck)` is the conditional probability of class `Ck` given feature `xi` that was calculated during training.
 
-Next we're going to instantiate a Multiclass Breakdown and Confusion Matrix report generator and wrap them in an Aggregate Report so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions on one axis and their ground-truth on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
+![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/naive-bayes-decision-function.png)
+
+Although this formula accurately represents the high-level Naive Bayes decision function, the actual calculation in Rubix ML is done in logarithmic space. Since very low probabilities have a tendency to become unstable when multiplied together, log probabilities offer greater numerical stability by converting the products in the original formula to a summations.
+
+### Validating the Model
+
+With the test predictions and their ground-truth labels in hand, we can now turn our focus to validating the model using the "holdout" technique. The process we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. The Rubix ML library provides an entire subsystem dedicated to cross-validation. In the next example, we're going to generate and save a JSON report that contains detailed metrics for us to evaluate the accuracy of the model.
+
+We'll instantiate a Multiclass Breakdown and Confusion Matrix report generator and wrap them in an Aggregate Report so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions counts on one axis with their ground-truth counts on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
 
 ```php
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
@@ -129,14 +152,14 @@ $reportGenerator = new AggregateReport([
 ]);
 ```
 
-To create the report object call the `generate()` method on the report generator with the predictions and ground-truth labels from the testing set as arguments.
+To create the report object call the `generate()` method on the report generator with the predictions we generated from the testing set and ground-truth labels as arguments.
 
 ```php
 
 $report = $reportGenerator->generate($predictions, $testing->labels());
 ```
 
-Since report objects implement the Stringable interface, we can output the report by echoing it out to the terminal.
+Since report objects implement the Stringable interface, we can output the report by echoing it out directly to the terminal.
 
 ```php
 echo $report
@@ -226,13 +249,15 @@ echo $report
 ]
 ```
 
-To save the report we can call the `saveTo()` method on the Encoding object that is returned by calling the `toJSON()` method on the Report object. In this example, we'll use the Filesystem Persister to save the report to a file named `report.json`.
+We can also save the report to look at later. To save the report, call the `saveTo()` method on the Encoding object that is returned by calling the `toJSON()` method on the Report object. In this example, we'll use the Filesystem Persister to save the report to a file named `report.json`.
 
 ```php
 use Rubix\ML\Persisters\Filesystem;
 
 $report->toJSON()->saveTo(new Filesystem('report.json'));
 ```
+
+### Saving the Model
 
 We'll also save the entire Pipeline so that we can use it within the context of our e-commerce system to identify potentially unhappy customers in our database. Rubix ML provides another meta-Estimator called Persistent Model that wraps a Persistable estimator and provides methods for saving and loading the model data from storage. In the example below we'll wrap our Pipeline object with Persistent Model and save it to the filesystem using the default RBX serializer.
 
@@ -244,6 +269,8 @@ $estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
 
 $estimator->save();
 ```
+
+### Production
 
 In practice, we'd probably spend more time iterating over the training and cross-validation process in an effort to fine-tune the dataset and hyper-parameters. We might also try out different classifiers such as Classification Tree or Logit Boost to see if they are better suited to our problem. For the next part of this tutorial, we're going to assume that we're fine with the model we've trained so far and we're ready to put it into production.
 

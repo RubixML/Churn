@@ -19,8 +19,6 @@ $connection = new PDO('sqlite:database.sqlite');
 
 $extractor = new SqlTable($connection, 'customers');
 
-$extractor = new LimitIterator($extractor->getIterator(), 0, 100);
-
 $extractor = new ColumnPicker($extractor, [
     'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
     'MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
