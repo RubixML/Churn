@@ -137,9 +137,9 @@ Although this formula accurately represents the high-level Naive Bayes decision 
 
 ### Validating the Model
 
-With the test predictions and their ground-truth labels in hand, we can now turn our focus to validating the model using the "holdout" technique. The process we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. The Rubix ML library provides an entire subsystem dedicated to cross-validation. In the next example, we're going to generate and save a JSON report that contains detailed metrics for us to evaluate the accuracy of the model.
+With the test predictions and their ground-truth labels in hand, we can now turn our focus to validating the model using the "holdout" technique. The process we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. In the next example, we're are going to generate a report from the held out testing data that contains detailed metrics for us to evaluate the accuracy of the model.
 
-We'll instantiate a Multiclass Breakdown and Confusion Matrix report generator and wrap them in an Aggregate Report so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions counts on one axis with their ground-truth counts on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
+We'll instantiate a [Multiclass Breakdown](https://docs.rubixml.com/2.0/cross-validation/reports/multiclass-breakdown.html) and [Confusion Matrix](https://docs.rubixml.com/2.0/cross-validation/reports/confusion-matrix.html) report generator and wrap them in an [Aggregate Report](https://docs.rubixml.com/2.0/cross-validation/reports/aggregate-report.html) so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions counts on one axis with their ground-truth counts on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
 
 ```php
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
@@ -159,7 +159,7 @@ To create the report object call the `generate()` method on the report generator
 $report = $reportGenerator->generate($predictions, $testing->labels());
 ```
 
-Since report objects implement the Stringable interface, we can output the report by echoing it out directly to the terminal.
+Since the Report object implements the [Stringable](https://www.php.net/manual/en/class.stringable.php) interface, we can output the report by echoing it out directly to the terminal. The example below illustrates a typical report for this classifier and dataset. You'll notice that Naive Bayes did a pretty good job at distinguishing the churned customers with an accuracy of about 78%.
 
 ```php
 echo $report
@@ -249,7 +249,7 @@ echo $report
 ]
 ```
 
-We can also save the report to look at later. To save the report, call the `saveTo()` method on the Encoding object that is returned by calling the `toJSON()` method on the Report object. In this example, we'll use the Filesystem Persister to save the report to a file named `report.json`.
+We can also save the report to share with our colleagues or look at later. To save the report, call the `saveTo()` method on the Encoding object that is returned by calling the `toJSON()` method on the Report object. In this example, we'll use the Filesystem Persister to save the report to a file named `report.json`.
 
 ```php
 use Rubix\ML\Persisters\Filesystem;
@@ -259,7 +259,7 @@ $report->toJSON()->saveTo(new Filesystem('report.json'));
 
 ### Saving the Model
 
-We'll also save the entire Pipeline so that we can use it within the context of our e-commerce system to identify potentially unhappy customers in our database. Rubix ML provides another meta-Estimator called Persistent Model that wraps a Persistable estimator and provides methods for saving and loading the model data from storage. In the example below we'll wrap our Pipeline object with Persistent Model and save it to the filesystem using the default RBX serializer.
+We'll also save the Pipeline estimator so that we can use it in another process to predict the customers in our database. Rubix ML provides another meta-Estimator called [Persistent Model](https://docs.rubixml.com/2.0/persistent-model.html) that wraps a [Persistable](https://docs.rubixml.com/2.0/persistable.html) estimator and provides methods for saving and loading the model parameters from storage. In the example below we'll wrap our Pipeline object with Persistent Model and save it to the filesystem using the default [RBX](https://docs.rubixml.com/2.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://docs.rubixml.com/2.0/serializers/native.html) serializer if you wanted to.
 
 ```php
 use Rubix\ML\PersistentModel;
@@ -270,13 +270,13 @@ $estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
 $estimator->save();
 ```
 
-### Production
+### Going Into Production
 
-In practice, we'd probably spend more time iterating over the training and cross-validation process in an effort to fine-tune the dataset and hyper-parameters. We might also try out different classifiers such as Classification Tree or Logit Boost to see if they are better suited to our problem. For the next part of this tutorial, we're going to assume that we're fine with the model we've trained so far and we're ready to put it into production.
+In practice, we'd probably spend some more time iterating over training and cross-validation in an effort to fine-tune the dataset and hyper-parameters. For the next part of this tutorial, we'll assume that we're fine with the model performance so far and we're ready to put it into production.
 
-The next thing we need to determine is when to make predictions about our customers. For this problem, it makes a lot of sense to generate predictions for all our customers at the same time and store the value in the database alongside the customer's data. Then, we could periodically predict the new customers and update the existing customers using a script that runs in the background of our application. The nice thing about this design is that we don't need to keep the model loaded into memory. However, if you need the prediction for new customers instantly or if you have a quickly evolving model, you may want to consider doing inference on-the-fly. See the [Server](https://github.com/RubixML/Server) package for an example of how to do this in a performant way using asynchronous PHP.
+First, we need to make the choice between doing real-time inference or caching the predictions. For this problem, it makes a lot of sense to generate predictions for all our customers at the same time and then storing the prediction in the database alongside the customer's data. Then, we could periodically predict the new customers and update the existing customers using a script that runs in the background of our application. The nice thing about this design is that we don't need to keep the model loaded into memory. However, if you need the prediction for new customers instantly or if you have a quickly evolving model, you may want to consider doing inference in real time. See the [Server](https://github.com/RubixML/Server) package for an example of how to do this in a performant way using asynchronous PHP and a long-running process.
 
-We're going to start a new script now for predicting the churn label of the customers in our database. For demonstration, we've provided an example Sqlite database with over 2000 customers. Let's load some customers from the database and use our stored model to predict their likelihood of churn. First, instantiate a SqlTable extractor by passing a PDO connection object pointed to our Sqlite database.
+We're going to start a new script for predicting the label of the customers in our database. For demonstration, we've provided an example Sqlite database with over 2000 customers. Let's load the samples from the database and use our saved model to predict the at-risk customers. The [SQL Table](https://docs.rubixml.com/2.0/extractors/sql-table.html) extractor is an iterator that iterates over an entire database table. In the next example, we'll pass a PDO object referencing our Sqlite database to the SQL Table extractor's constructor along with the name of the table we want to iterate over.
 
 ```php
 use Rubix\ML\Extractors\SqlTable;
@@ -287,13 +287,13 @@ $connection = new PDO('sqlite:database.sqlite');
 $extractor = new SqlTable($connection, 'customers');
 ```
 
-If we didn't want to load all the customers from our database all at once, we can use the PHP Limit Iterator to specify an offset and a limit like in the example below.
+If we didn't want to load all the customers in our database, we could wrap the extractor within the standard PHP Limit Iterator to specify an offset and a limit.
 
 ```php
 $extractor = new LimitIterator($extractor->getIterator(), 0, 100);
 ```
 
-Since we don't know the label of the customers in our database yet, we'll select the features of the samples without their corresponding labels. Make sure to load the features in the same order as they were given to train the model.
+As we did with the training and validation sets, we'll instantiate a Column Picker to select the right features from the database to input to the estimator. Remember that we don't have labels for the samples in our database yet as those are the ones we are going to predict.
 
 ```php
 $extractor = new ColumnPicker($extractor, [
@@ -304,13 +304,13 @@ $extractor = new ColumnPicker($extractor, [
 ]);
 ```
 
-Now, instantiate an Unlabeled dataset by calling the `fromIterator()` factory method with the extractor.
+Now, instantiate an Unlabeled dataset object by calling the `fromIterator()` method with the extractor as an argument.
 
 ```php
 $dataset = Unlabeled::fromIterator($extractor);
 ```
 
-With the samples loaded into memory, lets load the Pipeline we saved earlier into memory by calling the `load()` method on the Persistent Model meta-Estimator with a Filesystem persister pointing to the path of the model file in storage.
+We're almost there! Now, lets load the Pipeline estimator we saved earlier into memory by calling the `load()` method on the Persistent Model meta-Estimator class with a Filesystem persister pointing to the path of the model file in storage as an argument. Note that you may have to supply an option Serializer if the default one wasn't used. Once loaded from storage, the estimator is ready to go in the same state that it was saved in.
 
 ```php
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
