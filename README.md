@@ -292,11 +292,11 @@ If we didn't want to load all the customers in our database, we could wrap the e
 $extractor = new LimitIterator($extractor->getIterator(), 0, 100);
 ```
 
-As we did with the training and validation sets, we'll instantiate a Column Picker to select the right features from the database to input to the estimator. Remember that we don't have labels for the samples in our database yet as those are the ones we are going to predict.
+As we did with the training and validation sets, we'll instantiate a Column Picker to select the features from the database to input to the estimator. We'll also include the `Id` column which we'll use later when we update the database with the predictions.
 
 ```php
 $extractor = new ColumnPicker($extractor, [
-    'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
+    'Id', 'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
     'MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
     'TechSupport', 'TV', 'Movies', 'Contract', 'PaperlessBilling', 'PaymentMethod',
     'MonthlyCharges', 'TotalCharges', 'Region',
@@ -307,6 +307,14 @@ Now, instantiate an Unlabeled dataset object by calling the `fromIterator()` met
 
 ```php
 $dataset = Unlabeled::fromIterator($extractor);
+```
+
+To return the customer ids for every sample in the dataset, call the `feature()` method with the column offset of 0. Avoid feeding the customer Id to the estimator by dropping the it from the dataset.
+
+```php
+$ids = $dataset->feature(0);
+
+$dataset->dropFeature(0);
 ```
 
 We're almost there! Now, lets load the Pipeline estimator we saved earlier into memory by calling the `load()` method on the Persistent Model meta-Estimator class with a Filesystem persister pointing to the path of the model file in storage as an argument. Note that you may have to supply an option Serializer if the default one wasn't used. Once loaded from storage, the estimator is ready to go in the same state that it was saved in.
@@ -321,7 +329,21 @@ Finally, return the predictions for the customers in the database by passing the
 $predictions = $estimator->predict($dataset);
 ```
 
-From here, we can loop through the predictions and update the corresponding rows in the database.
+We'll use the same PDO connection object from before to prepare a SQL statement to update the customer. From here, we can loop through the predictions and update the corresponding rows in the database.
+
+```php
+$statement = $connection->prepare("UPDATE customers SET churn=? WHERE id=?");
+
+foreach ($predictions as $i => $prediction) {
+    $statement->execute([$prediction, $ids[$i]]);
+}
+```
+
+Voila! You've identified the customers that may be at risk of churning. Let's take a moment to recap. Remember we loaded a training dataset that had been labeled by our customer service department as either churning or not churning. Then we used that dataset to train a Naive Bayes classifier to predict the churn rate of the customers in our database. Lastly, we stored those predictions in the database so we could use them later within our app. Nice work! For further learning you may want to consider ...
+
+- Training with a different subset of the features. Are some features more predictive than others?
+- How does different prior probabilities and the smoothing hyper-parameter effect the predictions?
+- Swapping Naive Bayes for another classifier that is compatible with categorical features such as [Random Forest](https://docs.rubixml.com/2.0/classifiers/random-forest.html) or [Logit Boost](https://docs.rubixml.com/2.0/classifiers/logit-boost.html).
 
 ## Original Dataset
 https://github.com/codebrain001/customer-churn-prediction

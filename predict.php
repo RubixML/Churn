@@ -3,7 +3,7 @@
 include __DIR__ . '/vendor/autoload.php';
 
 use Rubix\ML\Loggers\Screen;
-use Rubix\ML\Extractors\SqlTable;
+use Rubix\ML\Extractors\SQLTable;
 use Rubix\ML\Extractors\ColumnPicker;
 use Rubix\ML\Datasets\Unlabeled;
 use Rubix\ML\PersistentModel;
@@ -20,7 +20,7 @@ $connection = new PDO('sqlite:database.sqlite');
 $extractor = new SqlTable($connection, 'customers');
 
 $extractor = new ColumnPicker($extractor, [
-    'id', 'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
+    'Id', 'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
     'MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
     'TechSupport', 'TV', 'Movies', 'Contract', 'PaperlessBilling', 'PaymentMethod',
     'MonthlyCharges', 'TotalCharges', 'Region',
@@ -40,3 +40,8 @@ $logger->info('Making predictions');
 
 $predictions = $estimator->predict($dataset);
 
+$statement = $connection->prepare("UPDATE customers SET churn=? WHERE id=?");
+
+foreach ($predictions as $i => $prediction) {
+    $statement->execute([$prediction, $ids[$i]]);
+}
