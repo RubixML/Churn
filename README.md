@@ -1,5 +1,6 @@
 # Rubix ML - Customer Churn Predictor
-Detect unhappy customers with Naive Bayes and 19 categorical features.
+
+Machine Learning is a paradigm shift from traditional programming because it allows the software itself to modify its programming through training and data. For this reason, you can think of Machine Learning as “programming with data.” Integrating ML into your project is therefore a practice of merging logic written by developers with logic that was learned by a Machine Learning algorithm. Today, we’ll talk about how you can start integrating Machine Learning models into your PHP projects using the open-source Rubix ML library. We’ll formulate the problem of customer churn prediction, train a model to identify what an unhappy customer looks like, and then use that model to detect the unhappy customers within our database.
 
 - **Difficulty:** Easy
 - **Training time:** Seconds
@@ -16,8 +17,6 @@ $ composer create-project rubix/churn
 ## Tutorial
 
 ### Introduction
-
-Machine Learning is a paradigm shift from traditional programming because it allows the software itself to modify its programming through training and data. For this reason, you can think of Machine Learning as “programming with data.” Integrating ML into your project is therefore a practice of merging logic written by developers with logic that was learned by a Machine Learning algorithm. Today, we’ll talk about how you can start integrating Machine Learning models into your PHP projects using the open-source Rubix ML library. We’ll formulate the problem of customer churn prediction, train a model to identify what an unhappy customer looks like, and then use that model to detect the unhappy customers within our database.
 
 Let’s start by introducing the problem of predicting customer churn. Churn rate is the rate at which customers discontinue use of a product or service over a period of time. If we could predict which of our customers are most likely to leave, then we could take action to try to repair the relationship before they are gone. But, how do we as developers encode the ruleset i.e. the “business logic” that determines what an unhappy customer looks like?
 
@@ -316,11 +315,13 @@ We're almost there! Now, lets load the Pipeline estimator we saved earlier into 
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
 ```
 
-Finally, return the predictions for the customers in our database by passing the inference set to the `predict()` method on the Pipeline meta-Estimator and store the values in the database under the Churn column.
+Finally, return the predictions for the customers in the database by passing the inference set to the `predict()` method on the Pipeline meta-Estimator. The predictions will be returned in the same order as the samples we loaded from the database.
 
 ```php
 $predictions = $estimator->predict($dataset);
 ```
+
+From here, we can loop through the predictions and update the corresponding rows in the database.
 
 ## Original Dataset
 https://github.com/codebrain001/customer-churn-prediction

@@ -20,7 +20,7 @@ $connection = new PDO('sqlite:database.sqlite');
 $extractor = new SqlTable($connection, 'customers');
 
 $extractor = new ColumnPicker($extractor, [
-    'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
+    'id', 'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
     'MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup', 'DeviceProtection',
     'TechSupport', 'TV', 'Movies', 'Contract', 'PaperlessBilling', 'PaymentMethod',
     'MonthlyCharges', 'TotalCharges', 'Region',
@@ -30,10 +30,13 @@ $dataset = Unlabeled::fromIterator($extractor);
 
 $logger->info('Loading model into memory');
 
+$ids = $dataset->feature(0);
+
+$dataset->dropFeature(0);
+
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
 
 $logger->info('Making predictions');
 
 $predictions = $estimator->predict($dataset);
 
-print_r($predictions);
