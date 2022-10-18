@@ -40,8 +40,12 @@ $logger->info('Making predictions');
 
 $predictions = $estimator->predict($dataset);
 
-$statement = $connection->prepare("UPDATE customers SET churn=? WHERE id=?");
+if (strtolower(readline('Save predictions to database? (y|[n]): ')) === 'y') {
+    $statement = $connection->prepare("UPDATE customers SET churn=? WHERE id=?");
 
-foreach ($predictions as $i => $prediction) {
-    $statement->execute([$prediction, $ids[$i]]);
+    foreach ($predictions as $i => $prediction) {
+        $statement->execute([$prediction, $ids[$i]]);
+    }
+
+    $logger->info('Predictions saved to database');
 }

@@ -15,7 +15,6 @@ use Rubix\ML\CrossValidation\Reports\ConfusionMatrix;
 use Rubix\ML\CrossValidation\Reports\MulticlassBreakdown;
 use Rubix\ML\PersistentModel;
 use Rubix\ML\Persisters\Filesystem;
-use Rubix\ML\Transformers\LambdaFunction;
 
 ini_set('memory_limit', '-1');
 
@@ -32,9 +31,7 @@ $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
 
 $dataset = Labeled::fromIterator($extractor);
 
-echo $dataset->apply(new NumericStringConverter())->describeByLabel();
-
-[$training, $testing] = $dataset->stratifiedSplit(0.8);
+[$training, $testing] = $dataset->randomize()->stratifiedSplit(0.8);
 
 $estimator = new NaiveBayes([
     'Yes' => 0.05,

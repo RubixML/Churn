@@ -47,10 +47,12 @@ use Rubix\ML\Datasets\Labeled;
 $dataset = Labeled::fromIterator($extractor);
 ```
 
-The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Naive Bayes to learn a model and the testing set will be used to gauge the model's accuracy after training. By stratifying the samples by label before splitting them into subsets, we ensure that the class proportions are maintained in both subsets. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later. Note that we use different samples to train the model than to validate it because we want to test the learner on samples it has never seen before.
+The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Naive Bayes to learn a model and the testing set will be used to gauge the model's accuracy after training. Randomizing the samples before creating the subsets helps reduce potential biases introduced by the data collection method. Stratifying the samples by label ensures that the class proportions are maintained in both subsets. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later using the randomized stratified splitting method.
+
+> **Note:** The reason we use different samples to train the model than to validate it is because we want to test the learner on samples it has never seen before.
 
 ```php
-[$training, $testing] = $dataset->stratifiedSplit(0.8);
+[$training, $testing] = $dataset->randomize()->stratifiedSplit(0.8);
 ```
 
 ### Training the Model
@@ -68,7 +70,7 @@ $estimator = new NaiveBayes([
 ]);
 ```
 
-In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` features all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their integer and floating point representations. For this, we'll apply a stateless Transformer called [Numeric String Converter](https://docs.rubixml.com/2.0/transformers/numeric-string-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://docs.rubixml.com/2.0/transformers/interval-discretizer.html) to derive 3 discrete categories or "levels" from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three discrete categories - "short", "medium", or "long."
+In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` features all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their integer and floating point representations. For this, we'll apply a stateless Transformer called [Numeric String Converter](https://docs.rubixml.com/2.0/transformers/numeric-string-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://docs.rubixml.com/2.0/transformers/interval-discretizer.html) to derive 3 discrete categories from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three equally proportional levels - "short", "medium", or "long."
 
 We'll wrap the entire series of transformations as well as the Naive Bayes estimator in a [Pipeline](https://docs.rubixml.com/2.0/pipeline.html) meta-Estimator to automatically fit and preprocess the dataset before training or inference. Fitting a transformer is analogous to training a learner and by wrapping both the transformers and estimator we can save both the transformer fittings as well as the model parameters as one atomic object.
 
@@ -79,7 +81,7 @@ use Rubix\ML\Transformers\IntervalDiscretizer;
 
 $estimator = new Pipeline([
     new NumericStringConverter(),
-    new IntervalDiscretizer(3),
+    new IntervalDiscretizer(3, true),
 ], $estimator);
 ```
 
@@ -132,7 +134,7 @@ Under the hood, the Naive Bayes algorithm combines the prior probability with th
 
 ![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/article/docs/images/naive-bayes-decision-function.png)
 
-Although this formula accurately represents the high-level Naive Bayes decision function, the actual calculation in Rubix ML is done in logarithmic space. Since very low probabilities have a tendency to become unstable when multiplied together, log probabilities offer greater numerical stability by converting the products in the original formula to a summations.
+Although this formula accurately represents the high-level Naive Bayes decision function, the actual calculation in Rubix ML is done in logarithmic space. Since very low probabilities have a tendency to become unstable when multiplied together, log probabilities offer greater numerical stability by converting the products in the original formula to summations.
 
 ### Validating the Model
 
