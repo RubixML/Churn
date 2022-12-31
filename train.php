@@ -34,8 +34,8 @@ $dataset = Labeled::fromIterator($extractor);
 [$training, $testing] = $dataset->randomize()->stratifiedSplit(0.8);
 
 $estimator = new NaiveBayes([
-    'Yes' => 0.05,
-    'No' => 0.95,
+    'Yes' => 0.1,
+    'No' => 0.9,
 ]);
 
 $estimator = new Pipeline([
