@@ -103,7 +103,7 @@ bool(true)
 
 To better understand what happened when we called the `train()` method let's peak under the hood of the Naive Bayes algorithm for a brief moment. The first thing the algorithm did was build a histogram for each feature for a particular class outcome by counting the number of times a category appeared in the training data. The algorithm then calculates the conditional probabilities for each category from the histogram by dividing the counts over the sample size. The algorithm repeats this process for every categorical feature in the dataset. Later, we'll demonstrate how these conditional probabilities are combined to produce the overall probability of a class outcome. In the example below, we see the histograms of the `Region` feature. Notice that customer with service in the East region were more likely to churn than other regions.
 
-![Region Histograms](https://raw.githubusercontent.com/RubixML/Churn/article/docs/images/region-histograms.png)
+![Region Histograms](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/region-histograms.png)
 
 ### Making Test Predictions
 
