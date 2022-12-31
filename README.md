@@ -132,7 +132,7 @@ Array
 
 Under the hood, the Naive Bayes algorithm combines the prior probability with the conditional probabilities of the unknown sample for each possible class and then predicts the class with the highest posterior probability. The following formula denotes the decision function that Naive Bayes uses to make a class prediction where `p(Ck)` is the class prior probability given as a hyper-parameter in this case and `p(xi | Ck)` is the conditional probability of class `Ck` given feature `xi` that was calculated during training.
 
-![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/article/docs/images/naive-bayes-decision-function.png)
+![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/naive-bayes-decision-function.png)
 
 Although this formula accurately represents the high-level Naive Bayes decision function, the actual calculation in Rubix ML is done in logarithmic space. Since very low probabilities have a tendency to become unstable when multiplied together, log probabilities offer greater numerical stability by converting the products in the original formula to summations.
 
