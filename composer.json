@@ -10,8 +10,7 @@
     "authors": [
         {
             "name": "Andrew DalPino",
-            "homepage": "https://github.com/andrewdalpino",
-            "role": "Lead Engineer"
+            "homepage": "https://github.com/andrewdalpino"
         }
     ],
     "require": {
