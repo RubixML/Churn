@@ -2,17 +2,17 @@
 
 Machine Learning is a paradigm shift from traditional programming because it allows the software itself to modify its programming through training and data. For this reason, you can think of Machine Learning as “programming with data.” Integrating ML into your project is therefore a practice of merging logic written by developers with logic that was learned by a Machine Learning algorithm. Today, we’ll talk about how you can start integrating Machine Learning models into your PHP projects using the open-source Rubix ML library. We’ll formulate the problem of customer churn prediction, train a model to identify what an unhappy customer looks like, and then use that model to detect the unhappy customers within our database.
 
-- **Difficulty:** Moderate
-- **Training time:** Seconds
-
 ## Installation
+
 Clone the project locally using [Composer](https://getcomposer.org/):
+
 ```sh
 $ composer create-project rubix/churn
 ```
 
 ## Requirements
-- [PHP](https://php.net) 7.4 or above
+
+- [PHP](https://php.net) 8.3 or above
 
 ## Tutorial
 
@@ -25,7 +25,6 @@ Imagine that you are a developer working at a telecommunications company tasked 
 ### Preparing the Dataset
 
 Before training the model, we need to gather the samples of satisfied and unsatisfied customers and label them accordingly. Then, we'll determine which features of a customer are beneficial in determining whether or not a customer will churn. For example, service region and the number of times the customer called for tech support are probably good features to include in the dataset, but features such as eye color and whether or not the customer has a back yard or not may be counterproductive to include them. In the example below, we'll load the samples from the provided example dataset using the CSV extractor and then select a subset of the features using the ColumnPicker. In Rubix ML, Extractors are iterators that stream data from storage into memory and can be wrapped by other iterators to modify the data in-flight. Note that we've included the label for each sample as the last column of the data table as is the convention.
-
 
 ```php
 use Rubix\ML\Extractors\CSV;
@@ -70,22 +69,22 @@ $estimator = new NaiveBayes([
 ]);
 ```
 
-In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` features all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their integer and floating point representations. For this, we'll apply a stateless Transformer called [Numeric String Converter](https://rubixml.github.io/ML/2.0/transformers/numeric-string-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://rubixml.github.io/ML/2.0/transformers/interval-discretizer.html) to derive 3 discrete categories from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three equally proportional levels - "short", "medium", or "long."
+In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` features all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their floating point representations. For this, we'll apply a stateless Transformer called [Float Type Converter](https://rubixml.github.io/ML/3.0/transformers/float-type-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://rubixml.github.io/ML/3.0/transformers/interval-discretizer.html) to derive 3 discrete categories from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three equally proportional levels - "short", "medium", or "long."
 
-We'll wrap the entire series of transformations as well as the Naive Bayes estimator in a [Pipeline](https://rubixml.github.io/ML/2.0/pipeline.html) meta-Estimator to automatically fit and preprocess the dataset before training or inference. Fitting a transformer is analogous to training a learner and by wrapping both the transformers and estimator we can save both the transformer fittings as well as the model parameters as one atomic object.
+We'll wrap the entire series of transformations as well as the Naive Bayes estimator in a [Pipeline](https://rubixml.github.io/ML/3.0/pipeline.html) meta-Estimator to automatically fit and preprocess the dataset before training or inference. Fitting a transformer is analogous to training a learner and by wrapping both the transformers and estimator we can save both the transformer fittings as well as the model parameters as one atomic object.
 
 ```php
 use Rubix\ML\Pipeline;
-use Rubix\ML\Transformers\NumericStringConverter;
+use Rubix\ML\Transformers\FloatTypeConverter;
 use Rubix\ML\Transformers\IntervalDiscretizer;
 
 $estimator = new Pipeline([
-    new NumericStringConverter(),
+    new FloatTypeConverter(),
     new IntervalDiscretizer(3, true),
 ], $estimator);
 ```
 
-Now we're ready to fit the transformers and train the model by passing the training dataset to the newly instantiated Pipeline meta-Estimator. 
+Now we're ready to fit the transformers and train the model by passing the training dataset to the newly instantiated Pipeline meta-Estimator.
 
 ```php
 $estimator->train($training);
@@ -140,7 +139,7 @@ Although this formula accurately represents the high-level Naive Bayes decision 
 
 With the test predictions and their ground-truth labels in hand, we can now turn our focus to validating the model using the "holdout" technique. The process we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. In the next example, we're are going to generate a report from the held out testing data that contains detailed metrics for us to evaluate the accuracy of the model.
 
-We'll instantiate a [Multiclass Breakdown](https://rubixml.github.io/ML/2.0/cross-validation/reports/multiclass-breakdown.html) and [Confusion Matrix](https://rubixml.github.io/ML/2.0/cross-validation/reports/confusion-matrix.html) report generator and wrap them in an [Aggregate Report](https://rubixml.github.io/ML/2.0/cross-validation/reports/aggregate-report.html) so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions counts on one axis with their ground-truth counts on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
+We'll instantiate a [Multiclass Breakdown](https://rubixml.github.io/ML/3.0/cross-validation/reports/multiclass-breakdown.html) and [Confusion Matrix](https://rubixml.github.io/ML/3.0/cross-validation/reports/confusion-matrix.html) report generator and wrap them in an [Aggregate Report](https://rubixml.github.io/ML/3.0/cross-validation/reports/aggregate-report.html) so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions counts on one axis with their ground-truth counts on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
 
 ```php
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
@@ -260,7 +259,7 @@ $report->toJSON()->saveTo(new Filesystem('report.json'));
 
 ### Saving the Model
 
-We'll also save the Pipeline estimator so that we can use it in another process to predict the customers in our database. Rubix ML provides another meta-Estimator called [Persistent Model](https://rubixml.github.io/ML/2.0/persistent-model.html) that wraps a [Persistable](https://rubixml.github.io/ML/2.0/persistable.html) estimator and provides methods for saving and loading the model parameters from storage. In the example below we'll wrap our Pipeline object with Persistent Model and save it to the filesystem using the default [RBX](https://rubixml.github.io/ML/2.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://rubixml.github.io/ML/2.0/serializers/native.html) serializer if you wanted to.
+We'll also save the Pipeline estimator so that we can use it in another process to predict the customers in our database. Rubix ML provides another meta-Estimator called [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html) that wraps a [Persistable](https://rubixml.github.io/ML/3.0/persistable.html) estimator and provides methods for saving and loading the model parameters from storage. In the example below we'll wrap our Pipeline object with Persistent Model and save it to the filesystem using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://rubixml.github.io/ML/3.0/serializers/native.html) serializer if you wanted to.
 
 ```php
 use Rubix\ML\PersistentModel;
@@ -277,7 +276,7 @@ In practice, we'd probably spend some more time iterating over training and cros
 
 First, we need to make the choice between doing real-time inference or caching the predictions. For this problem, it makes a lot of sense to generate predictions for all our customers at the same time and then storing the prediction in the database alongside the customer's data. Then, we could periodically predict the new customers and update the existing customers using a script that runs in the background of our application. The nice thing about this design is that we don't need to keep the model loaded into memory. However, if you need the prediction for new customers instantly or if you have a quickly evolving model, you may want to consider doing inference in real time. See the [Server](https://github.com/RubixML/Server) package for an example of how to do this in a performant way using asynchronous PHP and a long-running process.
 
-We're going to start a new script for predicting the label of the customers in our database. For demonstration, we've provided an example Sqlite database with over 2000 customers. Let's load the samples from the database and use our saved model to predict the at-risk customers. The [SQL Table](https://rubixml.github.io/ML/2.0/extractors/sql-table.html) extractor is an iterator that iterates over an entire database table. In the next example, we'll pass a PDO object referencing our Sqlite database to the SQL Table extractor's constructor along with the name of the table we want to iterate over.
+We're going to start a new script for predicting the label of the customers in our database. For demonstration, we've provided an example Sqlite database with over 2000 customers. Let's load the samples from the database and use our saved model to predict the at-risk customers. The [SQL Table](https://rubixml.github.io/ML/3.0/extractors/sql-table.html) extractor is an iterator that iterates over an entire database table. In the next example, we'll pass a PDO object referencing our Sqlite database to the SQL Table extractor's constructor along with the name of the table we want to iterate over.
 
 ```php
 use Rubix\ML\Extractors\SqlTable;
@@ -345,10 +344,12 @@ Voila! You've identified the customers that may be at risk of churning. Let's ta
 
 - Training with a different subset of the features. Are some features more predictive than others?
 - How does different prior probabilities and the smoothing hyper-parameter effect the predictions?
-- Swapping Naive Bayes for another classifier that is compatible with categorical features such as [Random Forest](https://rubixml.github.io/ML/2.0/classifiers/random-forest.html) or [Logit Boost](https://rubixml.github.io/ML/2.0/classifiers/logit-boost.html).
+- Swapping Naive Bayes for another classifier that is compatible with categorical features such as [Random Forest](https://rubixml.github.io/ML/3.0/classifiers/random-forest.html) or [Logit Boost](https://rubixml.github.io/ML/3.0/classifiers/logit-boost.html).
 
 ## Original Dataset
+
 https://github.com/codebrain001/customer-churn-prediction
 
 ## License
+
 The code is licensed [MIT](LICENSE) and the tutorial is licensed [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).

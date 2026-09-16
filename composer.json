@@ -15,7 +15,7 @@
     ],
     "require": {
         "php": ">=7.4",
-        "rubix/ml": "^2.3"
+        "rubix/ml": "dev-master"
     },
     "scripts": {
         "train": "@php train.php"

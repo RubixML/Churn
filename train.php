@@ -9,7 +9,7 @@ use Rubix\ML\Datasets\Labeled;
 use Rubix\ML\Classifiers\NaiveBayes;
 use Rubix\ML\Pipeline;
 use Rubix\ML\Transformers\IntervalDiscretizer;
-use Rubix\ML\Transformers\NumericStringConverter;
+use Rubix\ML\Transformers\FloatTypeConverter;
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
 use Rubix\ML\CrossValidation\Reports\ConfusionMatrix;
 use Rubix\ML\CrossValidation\Reports\MulticlassBreakdown;
@@ -39,7 +39,7 @@ $estimator = new NaiveBayes([
 ]);
 
 $estimator = new Pipeline([
-    new NumericStringConverter(),
+    new FloatTypeConverter(),
     new IntervalDiscretizer(3, true),
 ], $estimator);
 
