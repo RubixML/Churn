@@ -7,7 +7,8 @@ use Rubix\ML\Extractors\CSV;
 use Rubix\ML\Extractors\ColumnPicker;
 use Rubix\ML\Datasets\Labeled;
 use Rubix\ML\Classifiers\NaiveBayes;
-use Rubix\ML\Pipeline;
+use Rubix\ML\Transformers\PersistentTransformer;
+use Rubix\ML\Transformers\Pipeline;
 use Rubix\ML\Transformers\IntervalDiscretizer;
 use Rubix\ML\Transformers\FloatTypeConverter;
 use Rubix\ML\CrossValidation\Reports\AggregateReport;
@@ -29,19 +30,27 @@ $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
     'MonthlyCharges', 'TotalCharges', 'Region', 'Churn',
 ]);
 
+$transformer = new PersistentTransformer(
+    new Pipeline([
+        new FloatTypeConverter(),
+        new IntervalDiscretizer(3, true),
+    ]),
+    new Filesystem('transformer.rbx')
+);
+
+$estimator = new PersistentModel(
+    new NaiveBayes([
+        'Yes' => 0.1,
+        'No' => 0.9,
+    ]),
+    new Filesystem('model.rbx')
+);
+
 $dataset = Labeled::fromIterator($extractor);
 
+$dataset->apply($transformer);
+
 [$training, $testing] = $dataset->randomize()->stratifiedSplit(0.8);
-
-$estimator = new NaiveBayes([
-    'Yes' => 0.1,
-    'No' => 0.9,
-]);
-
-$estimator = new Pipeline([
-    new FloatTypeConverter(),
-    new IntervalDiscretizer(3, true),
-], $estimator);
 
 $logger->info('Training the model');
 
@@ -65,8 +74,7 @@ $report->toJSON()->saveTo(new Filesystem('report.json'));
 $logger->info('Report saved as report.json');
 
 if (strtolower(readline('Save this model? (y|[n]): ')) === 'y') {
-    $estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
-
+    $transformer->save();
     $estimator->save();
 
     $logger->info('Model saved as model.rbx');

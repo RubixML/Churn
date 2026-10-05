@@ -46,6 +46,34 @@ use Rubix\ML\Datasets\Labeled;
 $dataset = Labeled::fromIterator($extractor);
 ```
 
+### Preprocessing the Dataset
+
+In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their floating point representations. For this, we'll apply a stateless Transformer called [Float Type Converter](https://rubixml.github.io/ML/3.0/transformers/float-type-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://rubixml.github.io/ML/3.0/transformers/interval-discretizer.html) to derive 3 discrete categories from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three equally proportional levels - "short", "medium", or "long."
+
+We'll compose the transformers into a [Pipeline](https://rubixml.github.io/ML/3.0/pipeline.html) and then wrap that Pipeline in a [Persistent Transformer](https://rubixml.github.io/ML/3.0/persistent-transformer.html) meta-Transformer. The Persistent Transformer couples a Transformer with a Persister so that the fitted transformer can be saved to and loaded from storage independently of the model.
+
+```php
+use Rubix\ML\Transformers\PersistentTransformer;
+use Rubix\ML\Transformers\Pipeline;
+use Rubix\ML\Transformers\FloatTypeConverter;
+use Rubix\ML\Transformers\IntervalDiscretizer;
+use Rubix\ML\Persisters\Filesystem;
+
+$transformer = new PersistentTransformer(
+    new Pipeline([
+        new FloatTypeConverter(),
+        new IntervalDiscretizer(3, true),
+    ]),
+    new Filesystem('transformer.rbx')
+);
+```
+
+We can apply the transformer to the dataset by calling the `apply()` method. In this example, we apply the transformer to the entire labeled dataset before splitting it into subsets so that all samples share the same preprocessing.
+
+```php
+$dataset->apply($transformer);
+```
+
 The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Naive Bayes to learn a model and the testing set will be used to gauge the model's accuracy after training. Randomizing the samples before creating the subsets helps reduce potential biases introduced by the data collection method. Stratifying the samples by label ensures that the class proportions are maintained in both subsets. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later using the randomized stratified splitting method.
 
 > **Note:** The reason we use different samples to train the model than to validate it is because we want to test the learner on samples it has never seen before.
@@ -58,33 +86,25 @@ The next thing we'll do is create two subsets of the dataset to be used for trai
 
 Naive Bayes is an algorithm that uses counting and Bayes' Theorem to derive the conditional probabilities of a label given a sample consisting of only categorical features. The term “naive” is in reference to the algorithm’s feature independence assumption. It's naive because, in the real world, most features have interactions. In practice however, this assumption turns out not to be such a big problem.
 
-To instantiate our Naive Bayes estimator we need to call the constructor with a set of parameters (called "hyper-parameters") that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we need to be aware of. The `priors` argument allows the user to specify the class prior probabilities (i.e. the probability that a particular class will be the outcome if chosen randomly) instead of the default which is to calculate the prior probabilities from the training set. For example, if we know that our average churn rate is about 5% in real life, then we can specify that as the `"Yes"` class's prior probability and Naive Bayes will make predictions accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature calculated during training. Smoothing is a form of regularization that prevents the model from being overconfident especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter set at the default value of 1.0 but feel free to experiment with these settings on your own to see how they effect the accuracy of the model.
+To instantiate our Naive Bayes estimator we need to call the constructor with a set of parameters (called "hyper-parameters") that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we need to be aware of. The `priors` argument allows the user to specify the class prior probabilities (i.e. the probability that a particular class will be the outcome if chosen randomly) instead of the default which is to calculate the prior probabilities from the training set. For example, if we know that our average churn rate is about 10% in real life, then we can specify that as the `"Yes"` class's prior probability and Naive Bayes will make predictions accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature calculated during training. Smoothing is a form of regularization that prevents the model from being overconfident especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter set at the default value of 1.0 but feel free to experiment with these settings on your own to see how they effect the accuracy of the model.
+
+We'll wrap the Naive Bayes estimator in a [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html) meta-Estimator. The Persistent Model couples a [Persistable](https://rubixml.github.io/ML/3.0/persistable.html) estimator with a Persister so that we can save the trained model parameters to and load them from storage. In the example below we'll save the model to the filesystem using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer.
 
 ```php
 use Rubix\ML\Classifiers\NaiveBayes;
+use Rubix\ML\PersistentModel;
+use Rubix\ML\Persisters\Filesystem;
 
-$estimator = new NaiveBayes([
-    "Yes" => 0.05,
-    "No" => 0.95,
-]);
+$estimator = new PersistentModel(
+    new NaiveBayes([
+        "Yes" => 0.1,
+        "No" => 0.9,
+    ]),
+    new Filesystem('model.rbx')
+);
 ```
 
-In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` features all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their floating point representations. For this, we'll apply a stateless Transformer called [Float Type Converter](https://rubixml.github.io/ML/3.0/transformers/float-type-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://rubixml.github.io/ML/3.0/transformers/interval-discretizer.html) to derive 3 discrete categories from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three equally proportional levels - "short", "medium", or "long."
-
-We'll wrap the entire series of transformations as well as the Naive Bayes estimator in a [Pipeline](https://rubixml.github.io/ML/3.0/pipeline.html) meta-Estimator to automatically fit and preprocess the dataset before training or inference. Fitting a transformer is analogous to training a learner and by wrapping both the transformers and estimator we can save both the transformer fittings as well as the model parameters as one atomic object.
-
-```php
-use Rubix\ML\Pipeline;
-use Rubix\ML\Transformers\FloatTypeConverter;
-use Rubix\ML\Transformers\IntervalDiscretizer;
-
-$estimator = new Pipeline([
-    new FloatTypeConverter(),
-    new IntervalDiscretizer(3, true),
-], $estimator);
-```
-
-Now we're ready to fit the transformers and train the model by passing the training dataset to the newly instantiated Pipeline meta-Estimator.
+Now we're ready to train the model by passing the training dataset to the estimator.
 
 ```php
 $estimator->train($training);
@@ -259,13 +279,12 @@ $report->toJSON()->saveTo(new Filesystem('report.json'));
 
 ### Saving the Model
 
-We'll also save the Pipeline estimator so that we can use it in another process to predict the customers in our database. Rubix ML provides another meta-Estimator called [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html) that wraps a [Persistable](https://rubixml.github.io/ML/3.0/persistable.html) estimator and provides methods for saving and loading the model parameters from storage. In the example below we'll wrap our Pipeline object with Persistent Model and save it to the filesystem using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://rubixml.github.io/ML/3.0/serializers/native.html) serializer if you wanted to.
+We'll also save the transformers and the estimator so that we can use them in another process to predict the customers in our database. Since we already wrapped the transformers in a [Persistent Transformer](https://rubixml.github.io/ML/3.0/persistent-transformer.html) and the estimator in a [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html), we simply call the `save()` method on each and they will be written to their respective files using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://rubixml.github.io/ML/3.0/serializers/native.html) serializer if you wanted to.
+
+This produces two artifacts: `transformer.rbx`, which holds the fitted preprocessing, and `model.rbx`, which holds the trained Naive Bayes model parameters. Keeping the two separate means the preprocessing pipeline can be persisted and reused independently of the classifier.
 
 ```php
-use Rubix\ML\PersistentModel;
-use Rubix\ML\Persisters\Filesystem;
-
-$estimator = new PersistentModel($estimator, new Filesystem('model.rbx'));
+$transformer->save();
 
 $estimator->save();
 ```
@@ -279,12 +298,12 @@ First, we need to make the choice between doing real-time inference or caching t
 We're going to start a new script for predicting the label of the customers in our database. For demonstration, we've provided an example Sqlite database with over 2000 customers. Let's load the samples from the database and use our saved model to predict the at-risk customers. The [SQL Table](https://rubixml.github.io/ML/3.0/extractors/sql-table.html) extractor is an iterator that iterates over an entire database table. In the next example, we'll pass a PDO object referencing our Sqlite database to the SQL Table extractor's constructor along with the name of the table we want to iterate over.
 
 ```php
-use Rubix\ML\Extractors\SqlTable;
+use Rubix\ML\Extractors\SQLTable;
 use PDO;
 
 $connection = new PDO('sqlite:database.sqlite');
 
-$extractor = new SqlTable($connection, 'customers');
+$extractor = new SQLTable($connection, 'customers');
 ```
 
 If we didn't want to load all the customers in our database, we could wrap the extractor within the standard PHP Limit Iterator to specify an offset and a limit.
@@ -318,13 +337,23 @@ $ids = $dataset->feature(0);
 $dataset->dropFeature(0);
 ```
 
-We're almost there! Now, lets load the Pipeline estimator we saved earlier into memory by calling the `load()` method on the Persistent Model meta-Estimator class with a Filesystem persister pointing to the path of the model file in storage as an argument. Note that you may have to supply an option Serializer if the default one wasn't used. Once loaded from storage, the estimator is ready to go in the same state that it was saved in.
+We're almost there! Now, let's load the transformer and estimator we saved earlier into memory by calling the `load()` method on the Persistent Transformer and Persistent Model meta-classes, each with a Filesystem persister pointing to the path of its file in storage. Note that you may have to supply an option Serializer if the default one wasn't used. Once loaded from storage, each is ready to go in the same state that it was saved in.
 
 ```php
+use Rubix\ML\Transformers\PersistentTransformer;
+
+$transformer = PersistentTransformer::load(new Filesystem('transformer.rbx'));
+
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
 ```
 
-Finally, return the predictions for the customers in the database by passing the inference set to the `predict()` method on the Pipeline meta-Estimator. The predictions will be returned in the same order as the samples we loaded from the database.
+Before making predictions, we apply the loaded transformer to the dataset so the samples are preprocessed in the same way they were during training.
+
+```php
+$dataset->apply($transformer);
+```
+
+Finally, return the predictions for the customers in the database by passing the inference set to the `predict()` method on the estimator. The predictions will be returned in the same order as the samples we loaded from the database.
 
 ```php
 $predictions = $estimator->predict($dataset);
