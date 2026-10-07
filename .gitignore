@@ -1,6 +1,8 @@
 /vendor
 composer.lock
 report.json
+training.csv
+testing.csv
 model.rbx
 *.old
 Thumbs.db

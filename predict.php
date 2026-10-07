@@ -6,7 +6,7 @@ use Rubix\ML\Loggers\Screen;
 use Rubix\ML\Extractors\SQLTable;
 use Rubix\ML\Extractors\ColumnPicker;
 use Rubix\ML\Datasets\Unlabeled;
-use Rubix\ML\Transformers\PersistentTransformer;
+use Rubix\ML\Transformers\FloatTypeConverter;
 use Rubix\ML\PersistentModel;
 use Rubix\ML\Persisters\Filesystem;
 
@@ -35,13 +35,11 @@ $ids = $dataset->feature(0);
 
 $dataset->dropFeature(0);
 
-$transformer = PersistentTransformer::load(new Filesystem('transformer.rbx'));
-
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
 
 $logger->info('Preprocessing dataset');
 
-$dataset->apply($transformer);
+$dataset->apply(new FloatTypeConverter());
 
 $logger->info('Making predictions');
 

@@ -48,63 +48,78 @@ $dataset = Labeled::fromIterator($extractor);
 
 ### Preprocessing the Dataset
 
-In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their floating point representations. For this, we'll apply a stateless Transformer called [Float Type Converter](https://rubixml.github.io/ML/3.0/transformers/float-type-converter.html) to convert all the values in the first preprocessing step. Since Naive Bayes is only compatible with categorical features however, in the next step we'll also apply [Interval Discretizer](https://rubixml.github.io/ML/3.0/transformers/interval-discretizer.html) to derive 3 discrete categories from the aforementioned numerical features. In the context of `MonthsInService`, you can think of this transformation as converting the number of months to one of three equally proportional levels - "short", "medium", or "long."
+In the example dataset, `MonthsInService`, `MonthlyCharges`, and `TotalCharges` all have numerical values. Since all values in CSV format are interpreted as strings by default, we'll need to apply a preprocessing step that converts the numeric strings (ex. "42") in the dataset to their floating point representations. For this, we'll apply a stateless Transformer called [Float Type Converter](https://rubixml.github.io/ML/3.0/transformers/float-type-converter.html) to convert those values in the first preprocessing step. Logit Boost learns regression trees that split on numeric thresholds, so the numerical features can be left in their continuous form.
 
-We'll compose the transformers into a [Pipeline](https://rubixml.github.io/ML/3.0/pipeline.html) and then wrap that Pipeline in a [Persistent Transformer](https://rubixml.github.io/ML/3.0/persistent-transformer.html) meta-Transformer. The Persistent Transformer couples a Transformer with a Persister so that the fitted transformer can be saved to and loaded from storage independently of the model.
+Because Float Type Converter is stateless i.e. it has no learned parameters, there is no fitted transformer to persist alongside the model. We can simply apply a fresh instance directly to the dataset by calling the `apply()` method. In this example, we apply the transformer to the entire labeled dataset before splitting it into subsets so that all samples share the same preprocessing.
 
 ```php
-use Rubix\ML\Transformers\PersistentTransformer;
-use Rubix\ML\Transformers\Pipeline;
 use Rubix\ML\Transformers\FloatTypeConverter;
-use Rubix\ML\Transformers\IntervalDiscretizer;
-use Rubix\ML\Persisters\Filesystem;
 
-$transformer = new PersistentTransformer(
-    new Pipeline([
-        new FloatTypeConverter(),
-        new IntervalDiscretizer(3, true),
-    ]),
-    new Filesystem('transformer.rbx')
-);
+$dataset->apply(new FloatTypeConverter());
 ```
 
-We can apply the transformer to the dataset by calling the `apply()` method. In this example, we apply the transformer to the entire labeled dataset before splitting it into subsets so that all samples share the same preprocessing.
-
-```php
-$dataset->apply($transformer);
-```
-
-The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Naive Bayes to learn a model and the testing set will be used to gauge the model's accuracy after training. Randomizing the samples before creating the subsets helps reduce potential biases introduced by the data collection method. Stratifying the samples by label ensures that the class proportions are maintained in both subsets. In the example below, we'll put 80% of the labeled samples into the training set and use the remaining 20% for validation later using the randomized stratified splitting method.
+The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Grid Search to learn a model and the testing set will be used to gauge the model's accuracy after training. Stratifying the samples by label ensures that the class proportions are maintained in both subsets. In the example below, we'll put 90% of the labeled samples into the training set and use the remaining 10% for validation later using the stratified splitting method.
 
 > **Note:** The reason we use different samples to train the model than to validate it is because we want to test the learner on samples it has never seen before.
 
 ```php
-[$training, $testing] = $dataset->randomize()->stratifiedSplit(0.8);
+[$training, $testing] = $dataset->stratifiedSplit(0.9);
+```
+
+Since we're going to validate the model from a separate script later on, we'll export both subsets to their own CSV files so that the exact same held-out samples can be reused without re-running training. The `exportTo()` method writes a dataset to storage using the provided Exporter - in this case the standard CSV exporter with `overwrite` enabled so that files from a previous run are replaced.
+
+```php
+use Rubix\ML\Extractors\CSV;
+
+$training->exportTo(new CSV('training.csv'), overwrite: true);
+$testing->exportTo(new CSV('testing.csv'), overwrite: true);
 ```
 
 ### Training the Model
 
-Naive Bayes is an algorithm that uses counting and Bayes' Theorem to derive the conditional probabilities of a label given a sample consisting of only categorical features. The term “naive” is in reference to the algorithm’s feature independence assumption. It's naive because, in the real world, most features have interactions. In practice however, this assumption turns out not to be such a big problem.
+Logit Boost is a stage-wise additive ensemble that uses regression trees to iteratively learn a logistic regression model for binary classification. Instead of learning the labels directly, each boosting round trains a small regression tree to follow the gradient of the cross entropy loss function - in other words, to predict the current ensemble's error. The tree's predictions are then added to the ensemble scaled by a small learning rate, and the process repeats, concentrating more and more effort on the samples the model is least certain about. Because the base learners are decision trees, the ensemble can capture non-linearities and interactions between features that a linear model would miss.
 
-To instantiate our Naive Bayes estimator we need to call the constructor with a set of parameters (called "hyper-parameters") that will control how the learner behaves. The current implementation of Naive Bayes has two hyper-parameters that we need to be aware of. The `priors` argument allows the user to specify the class prior probabilities (i.e. the probability that a particular class will be the outcome if chosen randomly) instead of the default which is to calculate the prior probabilities from the training set. For example, if we know that our average churn rate is about 10% in real life, then we can specify that as the `"Yes"` class's prior probability and Naive Bayes will make predictions accordingly. The second hyper-parameter is the smoothing parameter which controls the amount of Laplacian smoothing added to the conditional probabilities of each feature calculated during training. Smoothing is a form of regularization that prevents the model from being overconfident especially when the number of training samples is low. For the purposes of this example, we'll leave the `smoothing` parameter set at the default value of 1.0 but feel free to experiment with these settings on your own to see how they effect the accuracy of the model.
+To instantiate our Logit Boost estimator we need to decide on a set of parameters (called "hyper-parameters") that will control how the learner behaves. The `booster` hyper-parameter is the base regressor used to fit the loss residuals - we'll use a [Regression Tree](https://rubixml.github.io/ML/3.0/regressors/regression-tree.html) so that each round contributes only a small, specialized tree to the ensemble. The `rate` is the learning rate i.e. the *shrinkage* applied to each step, keeping the influence of every booster modest so that the ensemble generalizes better. The `ratio` determines the proportion of training samples subsampled to train each booster, which injects a bit of randomness into the fitting process similar to bagging. The `epochs` hyper-parameter caps the number of boosting rounds at 1000, while `minChange` stops training early once the improvement in the cross entropy loss falls below `1e-5`. The remaining hyper-parameters (`evalInterval`, `window`, and `metric`) govern validation-based progress monitoring and early stopping, which require a validation set to be supplied with `setValidationDataset()` first.
 
-We'll wrap the Naive Bayes estimator in a [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html) meta-Estimator. The Persistent Model couples a [Persistable](https://rubixml.github.io/ML/3.0/persistable.html) estimator with a Persister so that we can save the trained model parameters to and load them from storage. In the example below we'll save the model to the filesystem using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer.
+Rather than committing to a single combination of those hyper-parameters up front, we'll let [Grid Search](https://rubixml.github.io/ML/3.0/grid-search.html) find a good one for us. Grid Search is a meta-estimator that trains one model for every combination of hyper-parameters in a grid, scores each combination using cross-validation, and then re-trains the winning combination on the full training dataset, exposing it as its base estimator. We'll construct the search with the `fromNamedParams()` factory by passing the class of the base learner along with the list of candidate values for each hyper-parameter we want to tune. Here we search over the depth of the `booster` tree (3 or 4), the `rate` (0.1 or 0.3), and the `ratio` (0.3, 0.5, or 0.7) - 12 combinations in total - while the remaining hyper-parameters are left at their default values. By default, each combination is scored by 5-fold cross-validation using the F Beta metric.
 
 ```php
-use Rubix\ML\Classifiers\NaiveBayes;
-use Rubix\ML\PersistentModel;
-use Rubix\ML\Persisters\Filesystem;
+use Rubix\ML\GridSearch;
+use Rubix\ML\Classifiers\LogitBoost;
+use Rubix\ML\Regressors\RegressionTree;
 
-$estimator = new PersistentModel(
-    new NaiveBayes([
-        "Yes" => 0.1,
-        "No" => 0.9,
-    ]),
-    new Filesystem('model.rbx')
+$estimator = GridSearch::fromNamedParams(
+    class: LogitBoost::class,
+    params: [
+        'booster' => [new RegressionTree(3), new RegressionTree(4)],
+        'rate' => [0.1, 0.3],
+        'ratio' => [0.3, 0.5, 0.7],
+    ],
 );
 ```
 
-Now we're ready to train the model by passing the training dataset to the estimator.
+Every trial in the search is independent of the others, so we can hand the work to a parallel processing backend to run them concurrently. The [Amp](https://rubixml.github.io/ML/3.0/backends/amp.html) backend executes the trials as asynchronous coroutines, cutting down the wall clock time of the search. We'll also attach a logger to the search so that it reports the score of each trial to the terminal as it completes.
+
+```php
+use Rubix\ML\Backends\Amp;
+use Rubix\ML\Loggers\Screen;
+
+$logger = new Screen();
+
+$estimator->setBackend(new Amp());
+
+$estimator->setLogger($logger);
+```
+
+As we mentioned earlier, Logit Boost's progress monitoring and early stopping need a validation dataset. Grid Search exposes a `setup()` method for exactly this kind of configuration - it registers a callback that is invoked on every candidate estimator before it is cross-validated, and again on the final winner before it is retrained on the full training set. Here we use it to hand each candidate the held-out testing set:
+
+```php
+$estimator->setup(function (LogitBoost $estimator) use ($testing) {
+    $estimator->setValidationDataset($testing);
+});
+```
+
+Now we're ready to train the model by passing the training dataset to the estimator. In one call, Grid Search cross-validates every combination, selects the best one, and trains a final model with it on the full training set.
 
 ```php
 $estimator->train($training);
@@ -120,44 +135,96 @@ var_dump($estimator->trained());
 bool(true)
 ```
 
-To better understand what happened when we called the `train()` method let's peak under the hood of the Naive Bayes algorithm for a brief moment. The first thing the algorithm did was build a histogram for each feature for a particular class outcome by counting the number of times a category appeared in the training data. The algorithm then calculates the conditional probabilities for each category from the histogram by dividing the counts over the sample size. The algorithm repeats this process for every categorical feature in the dataset. Later, we'll demonstrate how these conditional probabilities are combined to produce the overall probability of a class outcome. In the example below, we see the histograms of the `Region` feature. Notice that customer with service in the East region were more likely to churn than other regions.
-
-![Region Histograms](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/region-histograms.png)
-
-### Making Test Predictions
-
-We're going to need to generate some test predictions for the validation step in the process. The operation of making predictions is referred to as "inference" in Machine Learning terms because it involves taking an unlabeled sample and inferring its label. To return a set of predictions, pass the testing dataset to the `predict()` method on the estimator after it has been trained.
+Once the search is finished, we can inspect how each trial scored by echoing out the Report returned from the `results()` method. The rows are keyed by trial number in the order the trials were trained in, and each row contains the hyper-parameters that were tested along with the cross-validation score they received.
 
 ```php
-$predictions = $estimator->predict($testing);
+echo $estimator->results();
 ```
 
-We can view the class predictions by outputting them to the terminal like in the example below.
+```json
+{
+    "Trial 1": {
+        "booster": "Regression Tree (max height: 3, max leaf size: 5, max features: null, min purity increase: 1.0E-7, max bins: null)",
+        "rate": "0.1",
+        "ratio": "0.3",
+        "epochs": "1000",
+        "minChange": "1.0E-5",
+        "evalInterval": "3",
+        "window": "5",
+        "metric": "null",
+        "F Beta (beta: 1)": "0.73822930920074"
+    },
+    "Trial 2": {
+        "booster": "Regression Tree (max height: 3, max leaf size: 5, max features: null, min purity increase: 1.0E-7, max bins: null)",
+        "rate": "0.1",
+        "ratio": "0.5",
+        "epochs": "1000",
+        "minChange": "1.0E-5",
+        "evalInterval": "3",
+        "window": "5",
+        "metric": "null",
+        "F Beta (beta: 1)": "0.73725539246956"
+    },
+    ...
+}
+```
+
+You can see the same scores in the log lines emitted by the logger, one for each trial as it completes, followed by a line announcing the winning combination of hyper-parameters. In the example above, Trial 1 - a depth 3 booster with a `rate` of 0.1 and a `ratio` of 0.3 - came out on top with an F Beta of about 0.738, so that is the combination that was retrained on the full training set.
+
+To better understand what happened when we called the `train()` method let's peak under the hood of the boosting process for a brief moment. The algorithm begins with an ensemble that is completely ignorant about the labels and then loops over the epochs. At each epoch it computes the gradient of the cross entropy loss with respect to the ensemble's current predictions, fits the `booster` regression tree to that gradient using a random subsample of the training set weighted by how badly the current model is doing, and adds the tree's predictions to the ensemble scaled by the `rate`. Samples that the model currently misclassifies receive the largest weights, so each successive round focuses harder on the customers that are most difficult to separate. Training continues until either the maximum number of epochs is reached or the improvement in the loss falls below `minChange`.
+
+### Saving the Model
+
+Now we'll save the winning estimator - available from the `base()` method of the search - so that we can use it in another process to predict the customers in our database. We wrap it in a [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html) meta-Estimator. The Persistent Model couples a [Persistable](https://rubixml.github.io/ML/3.0/persistable.html) estimator with a Persister so that we can save the trained model parameters to and load them from storage. In the example below we save the model to the filesystem using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://rubixml.github.io/ML/3.0/serializers/native.html) serializer if you wanted to.
 
 ```php
-print_r($predictions);
+use Rubix\ML\PersistentModel;
+use Rubix\ML\Persisters\Filesystem;
+
+$estimator = new PersistentModel($estimator->base(), new Filesystem('model.rbx'));
+
+$estimator->save();
 ```
 
-```sh
-Array
-(
-    [0] => No
-    [1] => No
-    [2] => No
-    [3] => Yes
-    [4] => No
-)
-```
-
-Under the hood, the Naive Bayes algorithm combines the prior probability with the conditional probabilities of the unknown sample for each possible class and then predicts the class with the highest posterior probability. The following formula denotes the decision function that Naive Bayes uses to make a class prediction where `p(Ck)` is the class prior probability given as a hyper-parameter in this case and `p(xi | Ck)` is the conditional probability of class `Ck` given feature `xi` that was calculated during training.
-
-![Naive Bayes Decision Function](https://raw.githubusercontent.com/RubixML/Churn/master/docs/images/naive-bayes-decision-function.png)
-
-Although this formula accurately represents the high-level Naive Bayes decision function, the actual calculation in Rubix ML is done in logarithmic space. Since very low probabilities have a tendency to become unstable when multiplied together, log probabilities offer greater numerical stability by converting the products in the original formula to summations.
+Together, the training script produces three artifacts: `training.csv` and `testing.csv`, which hold the stratified train/test split we exported earlier, and `model.rbx`, which holds the trained Logit Boost model parameters. Keeping the split on disk means we can re-score the saved model at any time without having to train again - which is exactly what we'll do in the next section.
 
 ### Validating the Model
 
-With the test predictions and their ground-truth labels in hand, we can now turn our focus to validating the model using the "holdout" technique. The process we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. In the next example, we're are going to generate a report from the held out testing data that contains detailed metrics for us to evaluate the accuracy of the model.
+The operation of making predictions is referred to as "inference" in Machine Learning terms because it involves taking an unlabeled sample and inferring its label. We're going to need to generate some test predictions from the held-out testing set in order to validate the model. To keep the training script focused on training, we perform validation in a separate script called `validate.php`. Because the train/test split and the trained model were both persisted to disk, `validate.php` can be re-run at any time to score the saved model without having to train again.
+
+We'll start by rebuilding the exact testing set we exported during training by passing `testing.csv` to the CSV extractor. The file contains the features followed by the label as the last column, so we can instantiate a Labeled dataset from it directly.
+
+```php
+use Rubix\ML\Extractors\CSV;
+use Rubix\ML\Datasets\Labeled;
+
+$extractor = new CSV('testing.csv');
+
+$dataset = Labeled::fromIterator($extractor);
+```
+
+Next, we load the trained model from storage by calling the `load()` method on the Persistent Model meta-class with a Filesystem persister pointing to the path of its file in storage. Note that you may have to supply an optional Serializer if the default one wasn't used. Once loaded from storage, the model is ready to go in the same state that it was saved in.
+
+```php
+use Rubix\ML\PersistentModel;
+use Rubix\ML\Persisters\Filesystem;
+
+$estimator = PersistentModel::load(new Filesystem('model.rbx'));
+```
+
+Before making predictions, we apply the same Float Type Converter we used during training so that the samples are preprocessed in exactly the same way. Since the converter is stateless, a freshly constructed instance converts the numeric strings identically to the one used in training - there is no fitted transformer that needs to be loaded from storage. Finally, we return the predictions by passing the dataset to the `predict()` method on the estimator. The predictions come back in the same order as the samples we loaded from the file.
+
+```php
+use Rubix\ML\Transformers\FloatTypeConverter;
+
+$dataset->apply(new FloatTypeConverter());
+
+$predictions = $estimator->predict($dataset);
+```
+
+Under the hood, the Logit Boost algorithm sums the predictions of every booster in the ensemble to compute a margin `z` for the unknown sample, then passes that margin through the [Sigmoid](https://rubixml.github.io/ML/3.0/neural-network/activation-functions/sigmoid.html) activation function to squash it into a probability between 0 and 1. The sample is assigned the class on the positive side of the decision boundary - that is, whichever class corresponds to a positive margin. Because inference is just an accumulation of the individual tree predictions followed by a single squashing function, the calculation remains numerically stable no matter how many epochs were trained.
+
+With the test predictions and their ground-truth labels in hand, we can now turn our focus to validating the model using the "holdout" technique. The process we use to determine generalization performance is called cross-validation and the holdout technique is one of the most straightforward approaches. The upside to this method is that it's quick and only requires training one model to produce a meaningful validation score. However, the downside to this technique is that, since the validation score for the model is only calculated from a portion of the samples, it has less coverage than methods that train multiple models and test them on different samples each time. In the next example, we're going to generate a report from the held out testing data that contains detailed metrics for us to evaluate the accuracy of the model.
 
 We'll instantiate a [Multiclass Breakdown](https://rubixml.github.io/ML/3.0/cross-validation/reports/multiclass-breakdown.html) and [Confusion Matrix](https://rubixml.github.io/ML/3.0/cross-validation/reports/confusion-matrix.html) report generator and wrap them in an [Aggregate Report](https://rubixml.github.io/ML/3.0/cross-validation/reports/aggregate-report.html) so they can be generated at the same time. Multiclass Breakdown is a detailed report containing scores for a multitude of metrics including Accuracy, Precision, Recall, F-1 Score, and more on an overall and per-class basis. Confusion Matrix is a table that pairs the predictions counts on one axis with their ground-truth counts on the other. Counting each pair gives us a sense for which classes the estimator might be "confusing" another class for.
 
@@ -172,98 +239,97 @@ $reportGenerator = new AggregateReport([
 ]);
 ```
 
-To create the report object call the `generate()` method on the report generator with the predictions we generated from the testing set and ground-truth labels as arguments.
+To create the report object call the `generate()` method on the report generator with the predictions we generated from the testing set and the ground-truth labels from the dataset as arguments.
 
 ```php
-
-$report = $reportGenerator->generate($predictions, $testing->labels());
+$report = $reportGenerator->generate($predictions, $dataset->labels());
 ```
 
-Since the Report object implements the [Stringable](https://www.php.net/manual/en/class.stringable.php) interface, we can output the report by echoing it out directly to the terminal. The example below illustrates a typical report for this classifier and dataset. You'll notice that Naive Bayes did a pretty good job at distinguishing the churned customers with an accuracy of about 78%.
+Since the Report object implements the [Stringable](https://www.php.net/manual/en/class.stringable.php) interface, we can output the report by echoing it out directly to the terminal. The example below illustrates a typical report for this classifier and dataset. You'll notice that Logit Boost did a pretty good job at distinguishing the churned customers with an accuracy of about 81%.
 
 ```php
-echo $report
+echo $report;
 ```
 
 ```json
 [
     {
         "overall": {
-            "accuracy": 0.7806955287437899,
-            "balanced accuracy": 0.7405835852127411,
-            "f1 score": 0.7301102604109521,
-            "precision": 0.7226865136298422,
-            "recall": 0.7405835852127411,
-            "specificity": 0.7405835852127411,
-            "negative predictive value": 0.7226865136298422,
-            "false discovery rate": 0.27731348637015785,
-            "miss rate": 0.2594164147872588,
-            "fall out": 0.2594164147872588,
-            "false omission rate": 0.27731348637015785,
-            "mcc": 0.4629242695197278,
-            "informedness": 0.4811671704254823,
-            "markedness": 0.4453730272596843,
-            "true positives": 1100,
-            "true negatives": 1100,
-            "false positives": 309,
-            "false negatives": 309,
-            "cardinality": 1409
+            "accuracy": 0.8113475177304964,
+            "balanced accuracy": 0.6785559432618256,
+            "f1 score": 0.7044435128243115,
+            "precision": 0.8011456628477905,
+            "recall": 0.6785559432618256,
+            "specificity": 0.6785559432618256,
+            "negative predictive value": 0.8011456628477905,
+            "false discovery rate": 0.19885433715220946,
+            "miss rate": 0.3214440567381744,
+            "fall out": 0.3214440567381744,
+            "false omission rate": 0.19885433715220946,
+            "mcc": 0.46377299571663266,
+            "informedness": 0.3571118865236511,
+            "markedness": 0.6022913256955811,
+            "true positives": 572,
+            "true negatives": 572,
+            "false positives": 133,
+            "false negatives": 133,
+            "cardinality": 705
         },
         "classes": {
             "No": {
-                "accuracy": 0.7806955287437899,
-                "balanced accuracy": 0.7405835852127411,
-                "f1 score": 0.8469539375928679,
-                "precision": 0.8689024390243902,
-                "recall": 0.8260869565217391,
-                "specificity": 0.6550802139037433,
-                "negative predictive value": 0.5764705882352941,
-                "false discovery rate": 0.13109756097560976,
-                "miss rate": 0.17391304347826086,
-                "fall out": 0.34491978609625673,
-                "false omission rate": 0.42352941176470593,
-                "informedness": 0.4811671704254823,
-                "markedness": 0.4453730272596843,
-                "mcc": 0.4629242695197278,
-                "true positives": 855,
-                "true negatives": 245,
-                "false positives": 129,
-                "false negatives": 180,
-                "cardinality": 1035,
-                "proportion": 0.7345635202271115
+                "accuracy": 0.8113475177304964,
+                "balanced accuracy": 0.6785559432618256,
+                "f1 score": 0.8821966341895483,
+                "precision": 0.8150572831423896,
+                "recall": 0.9613899613899614,
+                "specificity": 0.39572192513368987,
+                "negative predictive value": 0.7872340425531915,
+                "false discovery rate": 0.18494271685761043,
+                "miss rate": 0.038610038610038644,
+                "fall out": 0.6042780748663101,
+                "false omission rate": 0.21276595744680848,
+                "informedness": 0.3571118865236511,
+                "markedness": 0.6022913256955811,
+                "mcc": 0.46377299571663266,
+                "true positives": 498,
+                "true negatives": 74,
+                "false positives": 113,
+                "false negatives": 20,
+                "cardinality": 518,
+                "proportion": 0.7347517730496453
             },
             "Yes": {
-                "accuracy": 0.7806955287437899,
-                "balanced accuracy": 0.7405835852127411,
-                "f1 score": 0.6132665832290363,
-                "precision": 0.5764705882352941,
-                "recall": 0.6550802139037433,
-                "specificity": 0.8260869565217391,
-                "negative predictive value": 0.8689024390243902,
-                "false discovery rate": 0.42352941176470593,
-                "miss rate": 0.34491978609625673,
-                "fall out": 0.17391304347826086,
-                "false omission rate": 0.13109756097560976,
-                "informedness": 0.4811671704254823,
-                "markedness": 0.4453730272596843,
-                "mcc": 0.4629242695197278,
-                "true positives": 245,
-                "true negatives": 855,
-                "false positives": 180,
-                "false negatives": 129,
-                "cardinality": 374,
-                "proportion": 0.2654364797728886
+                "accuracy": 0.8113475177304964,
+                "balanced accuracy": 0.6785559432618256,
+                "f1 score": 0.5266903914590747,
+                "precision": 0.7872340425531915,
+                "recall": 0.39572192513368987,
+                "specificity": 0.9613899613899614,
+                "negative predictive value": 0.8150572831423896,
+                "false discovery rate": 0.21276595744680848,
+                "miss rate": 0.6042780748663101,
+                "fall out": 0.038610038610038644,
+                "false omission rate": 0.18494271685761043,
+                "informedness": 0.3571118865236511,
+                "markedness": 0.6022913256955811,
+                "mcc": 0.46377299571663266,
+                "true positives": 74,
+                "true negatives": 498,
+                "false positives": 20,
+                "false negatives": 113,
+                "cardinality": 187,
+                "proportion": 0.2652482269503546
             }
         }
     },
     {
         "No": {
-            "No": 855,
-            "Yes": 129
+            "No": 498,
+            "Yes": 113
         },
         "Yes": {
-            "No": 180,
-            "Yes": 245
+            "No": 20,
+            "Yes": 74
         }
     }
 ]
@@ -277,17 +343,7 @@ use Rubix\ML\Persisters\Filesystem;
 $report->toJSON()->saveTo(new Filesystem('report.json'));
 ```
 
-### Saving the Model
-
-We'll also save the transformers and the estimator so that we can use them in another process to predict the customers in our database. Since we already wrapped the transformers in a [Persistent Transformer](https://rubixml.github.io/ML/3.0/persistent-transformer.html) and the estimator in a [Persistent Model](https://rubixml.github.io/ML/3.0/persistent-model.html), we simply call the `save()` method on each and they will be written to their respective files using the default [RBX](https://rubixml.github.io/ML/3.0/serializers/rbx.html) serializer. RBX is a proprietary format that builds on PHP's native serialization by adding compression, integrity checking, and version compatibility detection. You could also use the standard PHP [Native](https://rubixml.github.io/ML/3.0/serializers/native.html) serializer if you wanted to.
-
-This produces two artifacts: `transformer.rbx`, which holds the fitted preprocessing, and `model.rbx`, which holds the trained Naive Bayes model parameters. Keeping the two separate means the preprocessing pipeline can be persisted and reused independently of the classifier.
-
-```php
-$transformer->save();
-
-$estimator->save();
-```
+That's the whole of `validate.php` - run it with `php validate.php` to print the report to the terminal and write `report.json`, giving us a detailed snapshot of how well the saved model generalizes to customers it has never seen before.
 
 ### Going Into Production
 
@@ -337,20 +393,21 @@ $ids = $dataset->feature(0);
 $dataset->dropFeature(0);
 ```
 
-We're almost there! Now, let's load the transformer and estimator we saved earlier into memory by calling the `load()` method on the Persistent Transformer and Persistent Model meta-classes, each with a Filesystem persister pointing to the path of its file in storage. Note that you may have to supply an option Serializer if the default one wasn't used. Once loaded from storage, each is ready to go in the same state that it was saved in.
+We're almost there! Now, let's load the model we saved earlier into memory by calling the `load()` method on the Persistent Model meta-class with a Filesystem persister pointing to the path of its file in storage. Note that you may have to supply an optional Serializer if the default one wasn't used. Once loaded from storage, the model is ready to go in the same state that it was saved in.
 
 ```php
-use Rubix\ML\Transformers\PersistentTransformer;
-
-$transformer = PersistentTransformer::load(new Filesystem('transformer.rbx'));
+use Rubix\ML\PersistentModel;
+use Rubix\ML\Persisters\Filesystem;
 
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
 ```
 
-Before making predictions, we apply the loaded transformer to the dataset so the samples are preprocessed in the same way they were during training.
+Before making predictions, we apply the same Float Type Converter we used during training so the samples are preprocessed in exactly the same way. Since the converter is stateless, no fitted transformer needs to be loaded from storage - a freshly constructed instance converts the numeric strings identically.
 
 ```php
-$dataset->apply($transformer);
+use Rubix\ML\Transformers\FloatTypeConverter;
+
+$dataset->apply(new FloatTypeConverter());
 ```
 
 Finally, return the predictions for the customers in the database by passing the inference set to the `predict()` method on the estimator. The predictions will be returned in the same order as the samples we loaded from the database.
@@ -369,11 +426,12 @@ foreach ($predictions as $i => $prediction) {
 }
 ```
 
-Voila! You've identified the customers that may be at risk of churning. Let's take a moment to recap. Remember we loaded a training dataset that had been labeled by our customer service department as either churning or not churning. Then we used that dataset to train a Naive Bayes classifier to predict the churn rate of the customers in our database. Lastly, we stored those predictions in the database so we could use them later within our app. Nice work! For further learning you may want to consider ...
+Voila! You've identified the customers that may be at risk of churning. Let's take a moment to recap. Remember we loaded a training dataset that had been labeled by our customer service department as either churning or not churning. Then we used that dataset to train a Logit Boost classifier to predict the churn rate of the customers in our database. Lastly, we stored those predictions in the database so we could use them later within our app. Nice work! For further learning you may want to consider ...
 
 - Training with a different subset of the features. Are some features more predictive than others?
-- How does different prior probabilities and the smoothing hyper-parameter effect the predictions?
-- Swapping Naive Bayes for another classifier that is compatible with categorical features such as [Random Forest](https://rubixml.github.io/ML/3.0/classifiers/random-forest.html) or [Logit Boost](https://rubixml.github.io/ML/3.0/classifiers/logit-boost.html).
+- How does the learning rate and the maximum number of epochs effect the predictions?
+- Widening the grid search - would a larger search space, or a different validator or scoring metric, find even better hyper-parameters?
+- Swapping Logit Boost for another classifier such as [Random Forest](https://rubixml.github.io/ML/3.0/classifiers/random-forest.html) or [Naive Bayes](https://rubixml.github.io/ML/3.0/classifiers/naive-bayes.html).
 
 ## Original Dataset
 

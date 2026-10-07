@@ -2,26 +2,21 @@
 
 include __DIR__ . '/vendor/autoload.php';
 
+use Rubix\ML\GridSearch;
+use Rubix\ML\Backends\Amp;
 use Rubix\ML\Loggers\Screen;
 use Rubix\ML\Extractors\CSV;
 use Rubix\ML\Extractors\ColumnPicker;
 use Rubix\ML\Datasets\Labeled;
-use Rubix\ML\Classifiers\NaiveBayes;
-use Rubix\ML\Transformers\PersistentTransformer;
-use Rubix\ML\Transformers\Pipeline;
-use Rubix\ML\Transformers\IntervalDiscretizer;
+use Rubix\ML\Classifiers\LogitBoost;
+use Rubix\ML\Regressors\RegressionTree;
 use Rubix\ML\Transformers\FloatTypeConverter;
-use Rubix\ML\CrossValidation\Reports\AggregateReport;
-use Rubix\ML\CrossValidation\Reports\ConfusionMatrix;
-use Rubix\ML\CrossValidation\Reports\MulticlassBreakdown;
 use Rubix\ML\PersistentModel;
 use Rubix\ML\Persisters\Filesystem;
 
 ini_set('memory_limit', '-1');
 
 $logger = new Screen();
-
-$logger->info('Loading data into memory');
 
 $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
     'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
@@ -30,52 +25,46 @@ $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
     'MonthlyCharges', 'TotalCharges', 'Region', 'Churn',
 ]);
 
-$transformer = new PersistentTransformer(
-    new Pipeline([
-        new FloatTypeConverter(),
-        new IntervalDiscretizer(3, true),
-    ]),
-    new Filesystem('transformer.rbx')
+$estimator = GridSearch::fromNamedParams(
+    class: LogitBoost::class,
+    params: [
+        'booster' => [new RegressionTree(3), new RegressionTree(4)],
+        'rate' => [0.1, 0.3],
+        'ratio' => [0.3, 0.5, 0.7],
+    ],
 );
 
-$estimator = new PersistentModel(
-    new NaiveBayes([
-        'Yes' => 0.1,
-        'No' => 0.9,
-    ]),
-    new Filesystem('model.rbx')
-);
+$estimator->setBackend(new Amp());
+
+$estimator->setLogger($logger);
+
+$logger->info('Loading data into memory');
 
 $dataset = Labeled::fromIterator($extractor);
 
-$dataset->apply($transformer);
+$logger->info('Preprocessing the dataset');
 
-[$training, $testing] = $dataset->randomize()->stratifiedSplit(0.8);
+$dataset->apply(new FloatTypeConverter());
+
+[$training, $testing] = $dataset->stratifiedSplit(0.9);
+
+$estimator->setup(function (LogitBoost $estimator) use ($testing) {
+    $estimator->setValidationDataset($testing);
+});
+
+$logger->info('Exporting train/test split');
+
+$training->exportTo(new CSV('training.csv'), overwrite: true);
+$testing->exportTo(new CSV('testing.csv'), overwrite: true);
 
 $logger->info('Training the model');
 
 $estimator->train($training);
 
-$logger->info('Making predictions');
+echo $estimator->results();
 
-$predictions = $estimator->predict($testing);
+$estimator = new PersistentModel($estimator->base(), new Filesystem('model.rbx'));
 
-$reportGenerator = new AggregateReport([
-    new MulticlassBreakdown(),
-    new ConfusionMatrix(),
-]);
+$estimator->save();
 
-$report = $reportGenerator->generate($predictions, $testing->labels());
-
-echo $report;
-
-$report->toJSON()->saveTo(new Filesystem('report.json'));
-
-$logger->info('Report saved as report.json');
-
-if (strtolower(readline('Save this model? (y|[n]): ')) === 'y') {
-    $transformer->save();
-    $estimator->save();
-
-    $logger->info('Model saved as model.rbx');
-}
+$logger->info('Model saved as model.rbx');
