@@ -1,6 +1,7 @@
 /vendor
 composer.lock
 report.json
+results.json
 training.csv
 testing.csv
 model.rbx

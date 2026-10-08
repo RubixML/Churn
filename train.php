@@ -63,6 +63,10 @@ $estimator->train($training);
 
 echo $estimator->results();
 
+$estimator->results()->toJSON()->saveTo(new Filesystem('results.json'));
+
+$logger->info('Results saved to results.json');
+
 $estimator = new PersistentModel($estimator->base(), new Filesystem('model.rbx'));
 
 $estimator->save();
