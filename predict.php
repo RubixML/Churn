@@ -6,6 +6,7 @@ use Rubix\ML\Loggers\Screen;
 use Rubix\ML\Extractors\SQLTable;
 use Rubix\ML\Extractors\ColumnPicker;
 use Rubix\ML\Datasets\Unlabeled;
+use Rubix\ML\Transformers\FloatTypeConverter;
 use Rubix\ML\PersistentModel;
 use Rubix\ML\Persisters\Filesystem;
 
@@ -17,7 +18,7 @@ $logger->info('Loading data into memory');
 
 $connection = new PDO('sqlite:database.sqlite');
 
-$extractor = new SqlTable($connection, 'customers');
+$extractor = new SQLTable($connection, 'customers');
 
 $extractor = new ColumnPicker($extractor, [
     'Id', 'Gender', 'SeniorCitizen', 'Partner', 'Dependents', 'MonthsInService', 'Phone',
@@ -35,6 +36,10 @@ $ids = $dataset->feature(0);
 $dataset->dropFeature(0);
 
 $estimator = PersistentModel::load(new Filesystem('model.rbx'));
+
+$logger->info('Preprocessing dataset');
+
+$dataset->apply(new FloatTypeConverter());
 
 $logger->info('Making predictions');
 
