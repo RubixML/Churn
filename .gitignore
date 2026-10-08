@@ -3,6 +3,8 @@ composer.lock
 report.json
 model.rbx
 *.old
+testing.csv
+training.csv
 Thumbs.db
 .DS_Store
 .vscode
