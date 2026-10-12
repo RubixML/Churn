@@ -2,8 +2,7 @@
 
 include __DIR__ . '/vendor/autoload.php';
 
-use Rubix\ML\GridSearch;
-use Rubix\ML\Backends\Amp;
+use Rubix\ML\BayesianSearch;
 use Rubix\ML\Loggers\Screen;
 use Rubix\ML\Extractors\CSV;
 use Rubix\ML\Extractors\ColumnPicker;
@@ -25,16 +24,24 @@ $extractor = new ColumnPicker(new CSV('dataset.csv', true), [
     'MonthlyCharges', 'TotalCharges', 'Region', 'Churn',
 ]);
 
-$estimator = GridSearch::fromNamedParams(
+$estimator = BayesianSearch::fromNamedParams(
     class: LogitBoost::class,
     params: [
-        'booster' => [new RegressionTree(3), new RegressionTree(4)],
-        'rate' => [0.1, 0.3],
+        'booster' => [
+            new RegressionTree(3, 1),
+            new RegressionTree(4, 1),
+            new RegressionTree(3, 5),
+            new RegressionTree(4, 5),
+            new RegressionTree(3, 10),
+            new RegressionTree(4, 10),
+        ],
+        'rate' => [0.1, 0.3, 0.5],
         'ratio' => [0.3, 0.5, 0.7],
-    ],
-);
 
-$estimator->setBackend(new Amp());
+    ],
+    initialTrials: 3,
+    maxTrials: 10
+);
 
 $estimator->setLogger($logger);
 
@@ -62,6 +69,8 @@ $logger->info('Training the model');
 $estimator->train($training);
 
 echo $estimator->results();
+
+var_dump($estimator->base()->params());
 
 $estimator->results()->toJSON()->saveTo(new Filesystem('results.json'));
 

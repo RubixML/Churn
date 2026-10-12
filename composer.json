@@ -15,7 +15,7 @@
     ],
     "require": {
         "php": ">=7.4",
-        "rubix/ml": "^3.0"
+        "rubix/ml": "^3.2"
     },
     "scripts": {
         "train": "@php train.php"
