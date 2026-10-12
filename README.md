@@ -58,7 +58,7 @@ use Rubix\ML\Transformers\FloatTypeConverter;
 $dataset->apply(new FloatTypeConverter());
 ```
 
-The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Grid Search to learn a model and the testing set will be used to gauge the model's accuracy after training. Stratifying the samples by label ensures that the class proportions are maintained in both subsets. In the example below, we'll put 90% of the labeled samples into the training set and use the remaining 10% for validation later using the stratified splitting method.
+The next thing we'll do is create two subsets of the dataset to be used for training and testing. The training set will be used by Bayesian Search to learn a model and the testing set will be used to gauge the model's accuracy after training. Stratifying the samples by label ensures that the class proportions are maintained in both subsets. In the example below, we'll put 90% of the labeled samples into the training set and use the remaining 10% for validation later using the stratified splitting method.
 
 > **Note:** The reason we use different samples to train the model than to validate it is because we want to test the learner on samples it has never seen before.
 
@@ -81,37 +81,43 @@ Logit Boost is a stage-wise additive ensemble that uses regression trees to iter
 
 To instantiate our Logit Boost estimator we need to decide on a set of parameters (called "hyper-parameters") that will control how the learner behaves. The `booster` hyper-parameter is the base regressor used to fit the loss residuals - we'll use a [Regression Tree](https://rubixml.github.io/ML/3.0/regressors/regression-tree.html) so that each round contributes only a small, specialized tree to the ensemble. The `rate` is the learning rate i.e. the *shrinkage* applied to each step, keeping the influence of every booster modest so that the ensemble generalizes better. The `ratio` determines the proportion of training samples subsampled to train each booster, which injects a bit of randomness into the fitting process similar to bagging. The `epochs` hyper-parameter caps the number of boosting rounds at 1000, while `minChange` stops training early once the improvement in the cross entropy loss falls below `1e-5`. The remaining hyper-parameters (`evalInterval`, `window`, and `metric`) govern validation-based progress monitoring and early stopping, which require a validation set to be supplied with `setValidationDataset()` first.
 
-Rather than committing to a single combination of those hyper-parameters up front, we'll let [Grid Search](https://rubixml.github.io/ML/3.0/grid-search.html) find a good one for us. Grid Search is a meta-estimator that trains one model for every combination of hyper-parameters in a grid, scores each combination using cross-validation, and then re-trains the winning combination on the full training dataset, exposing it as its base estimator. We'll construct the search with the `fromNamedParams()` factory by passing the class of the base learner along with the list of candidate values for each hyper-parameter we want to tune. Here we search over the depth of the `booster` tree (3 or 4), the `rate` (0.1 or 0.3), and the `ratio` (0.3, 0.5, or 0.7) - 12 combinations in total - while the remaining hyper-parameters are left at their default values. By default, each combination is scored by 5-fold cross-validation using the F Beta metric.
+Rather than committing to a single combination of those hyper-parameters up front, we'll let [Bayesian Search](https://rubixml.github.io/ML/3.0/bayesian-search.html) find a good one for us. Bayesian Search is a form of hyper-parameter optimization that uses the *Tree-structured Parzen Estimator* (TPE) to propose the next set of hyper-parameters to evaluate based on the results of the trials before it. Unlike [Grid Search](https://rubixml.github.io/ML/3.0/grid-search.html), which exhaustively evaluates every combination, it samples the space one candidate at a time, updating its beliefs after every trial, and with each new proposal concentrating its search on the regions of the hyper-parameter space most likely to yield an improvement. We'll construct the search with the `fromNamedParams()` factory by passing the class of the base learner along with the list of candidate values for each hyper-parameter we want to tune, and we'll cap the session with `initialTrials` and `maxTrials`. Here we declare the `maxHeight` (3 or 4) and `maxLeafSize` (1, 5, or 10) of the `booster` tree, the `rate` (0.1, 0.3, or 0.5), and the `ratio` (0.3, 0.5, or 0.7) - a space of 54 combinations - while the remaining hyper-parameters are left at their default values. The first `initialTrials` are drawn uniformly from the space to seed the model, after which it estimates the likelihood of each candidate value from the "good" (top-performing) trials seen so far and uses that to propose combinations concentrated around the promising regions, stopping once it has trained `maxTrials` candidate models. By default, each trial is scored by 5-fold cross-validation using the F Beta metric.
 
 ```php
-use Rubix\ML\GridSearch;
+use Rubix\ML\BayesianSearch;
 use Rubix\ML\Classifiers\LogitBoost;
 use Rubix\ML\Regressors\RegressionTree;
 
-$estimator = GridSearch::fromNamedParams(
+$estimator = BayesianSearch::fromNamedParams(
     class: LogitBoost::class,
     params: [
-        'booster' => [new RegressionTree(3), new RegressionTree(4)],
-        'rate' => [0.1, 0.3],
+        'booster' => [
+            new RegressionTree(3, 1),
+            new RegressionTree(4, 1),
+            new RegressionTree(3, 5),
+            new RegressionTree(4, 5),
+            new RegressionTree(3, 10),
+            new RegressionTree(4, 10),
+        ],
+        'rate' => [0.1, 0.3, 0.5],
         'ratio' => [0.3, 0.5, 0.7],
     ],
+    initialTrials: 3,
+    maxTrials: 10
 );
 ```
 
-Every trial in the search is independent of the others, so we can hand the work to a parallel processing backend to run them concurrently. The [Amp](https://rubixml.github.io/ML/3.0/backends/amp.html) backend executes the trials as asynchronous coroutines, cutting down the wall clock time of the search. We'll also attach a logger to the search so that it reports the score of each trial to the terminal as it completes.
+Because the trials are evaluated using the TPE in a sequential chain of dependent proposals, we can't distribute the work across a parallel backend. We'll still attach a logger to the search so that it reports the score and hyper-parameters of each trial to the terminal as it completes.
 
 ```php
-use Rubix\ML\Backends\Amp;
 use Rubix\ML\Loggers\Screen;
 
 $logger = new Screen();
 
-$estimator->setBackend(new Amp());
-
 $estimator->setLogger($logger);
 ```
 
-As we mentioned earlier, Logit Boost's progress monitoring and early stopping need a validation dataset. Grid Search exposes a `setup()` method for exactly this kind of configuration - it registers a callback that is invoked on every candidate estimator before it is cross-validated, and again on the final winner before it is retrained on the full training set. Here we use it to hand each candidate the held-out testing set:
+As we mentioned earlier, Logit Boost's progress monitoring and early stopping need a validation dataset. Bayesian Search exposes a `setup()` method for exactly this kind of configuration - it registers a callback that is invoked on every candidate estimator before it is cross-validated, and again on the final winner before it is retrained on the full training set. Here we use it to hand each candidate the held-out testing set:
 
 ```php
 $estimator->setup(function (LogitBoost $estimator) use ($testing) {
@@ -119,23 +125,40 @@ $estimator->setup(function (LogitBoost $estimator) use ($testing) {
 });
 ```
 
-Now we're ready to train the model by passing the training dataset to the estimator. In one call, Grid Search cross-validates every combination, selects the best one, and trains a final model with it on the full training set.
+Now we're ready to train the model by passing the training dataset to the estimator. In one call, Bayesian Search evaluates up to `maxTrials` candidate combinations, selects the best one, and trains a final model with it on the full training set.
 
 ```php
 $estimator->train($training);
 ```
 
-We can verify that the learner has been trained by calling the `trained()` method on the Estimator interface.
+We can inspect the configuration of the winning estimator by calling the `base()` method of the search to obtain the base learner and then the `params()` method on it. The parameter table of the base learner reflects the hyper-parameters of the best combination the search settled on.
 
 ```php
-var_dump($estimator->trained());
+var_dump($estimator->base()->params());
 ```
 
 ```sh
-bool(true)
+array(8) {
+  ["booster"]=>
+  object(Rubix\ML\Regressors\RegressionTree)#
+  ["rate"]=>
+  float(0.3)
+  ["ratio"]=>
+  float(0.7)
+  ["epochs"]=>
+  int(1000)
+  ["min change"]=>
+  float(1.0E-5)
+  ["eval interval"]=>
+  int(3)
+  ["window"]=>
+  int(5)
+  ["metric"]=>
+  NULL
+}
 ```
 
-Once the search is finished, we can inspect how each trial scored by echoing out the Report returned from the `results()` method. The rows are keyed by trial number in the order the trials were trained in, and each row contains the hyper-parameters that were tested along with the cross-validation score they received.
+Once the search is finished, we can inspect how each trial scored by echoing out the Report returned from the `results()` method. The rows are keyed by trial number in the order the trials were evaluated, and each row contains the hyper-parameters that were tested along with the cross-validation score they received.
 
 ```php
 echo $estimator->results();
@@ -144,34 +167,46 @@ echo $estimator->results();
 ```json
 {
     "Trial 1": {
-        "booster": "Regression Tree (max height: 3, max leaf size: 5, max features: null, min purity increase: 1.0E-7, max bins: null)",
-        "rate": "0.1",
-        "ratio": "0.3",
-        "epochs": "1000",
-        "minChange": "1.0E-5",
-        "evalInterval": "3",
-        "window": "5",
-        "metric": "null",
-        "F Beta (beta: 1)": "0.73822930920074"
+        "F Beta (beta: 1)": "0.70894532022144",
+        "params": {
+            "booster": "Regression Tree (max height: 3, max leaf size: 5, max features: null, min purity increase: 1.0E-7, max bins: null)",
+            "rate": "0.1",
+            "ratio": "0.5",
+            "epochs": "1000",
+            "minChange": "1.0E-5",
+            "evalInterval": "3",
+            "window": "5",
+            "metric": "null"
+        }
     },
-    "Trial 2": {
-        "booster": "Regression Tree (max height: 3, max leaf size: 5, max features: null, min purity increase: 1.0E-7, max bins: null)",
-        "rate": "0.1",
-        "ratio": "0.5",
-        "epochs": "1000",
-        "minChange": "1.0E-5",
-        "evalInterval": "3",
-        "window": "5",
-        "metric": "null",
-        "F Beta (beta: 1)": "0.73725539246956"
+    "Trial 4": {
+        "F Beta (beta: 1)": "0.73654918046307",
+        "params": {
+            "booster": "Regression Tree (max height: 4, max leaf size: 5, max features: null, min purity increase: 1.0E-7, max bins: null)",
+            "rate": "0.3",
+            "ratio": "0.7",
+            "epochs": "1000",
+            "minChange": "1.0E-5",
+            "evalInterval": "3",
+            "window": "5",
+            "metric": "null"
+        }
     },
     ...
 }
 ```
 
-You can see the same scores in the log lines emitted by the logger, one for each trial as it completes, followed by a line announcing the winning combination of hyper-parameters. In the example above, Trial 1 - a depth 3 booster with a `rate` of 0.1 and a `ratio` of 0.3 - came out on top with an F Beta of about 0.738, so that is the combination that was retrained on the full training set.
+You can see the same scores in the log lines emitted by the logger, one for each trial as it completes, followed by a line announcing the winning combination of hyper-parameters. In the example above, Trial 4 - a `maxHeight` 4, `maxLeafSize` 5 booster with a `rate` of 0.3 and a `ratio` of 0.7 - came out on top with an F Beta of about 0.737, so that is the combination that was retrained on the full training set.
 
 To better understand what happened when we called the `train()` method let's peak under the hood of the boosting process for a brief moment. The algorithm begins with an ensemble that is completely ignorant about the labels and then loops over the epochs. At each epoch it computes the gradient of the cross entropy loss with respect to the ensemble's current predictions, fits the `booster` regression tree to that gradient using a random subsample of the training set weighted by how badly the current model is doing, and adds the tree's predictions to the ensemble scaled by the `rate`. Samples that the model currently misclassifies receive the largest weights, so each successive round focuses harder on the customers that are most difficult to separate. Training continues until either the maximum number of epochs is reached or the improvement in the loss falls below `minChange`.
+
+We can also save the search report itself to share with our colleagues or to refer back to later. Calling `toJSON()` on the Report produced by `results()` and then `saveTo()` with a Filesystem persister writes out the trial-by-trial scores as a JSON file.
+
+```php
+use Rubix\ML\Persisters\Filesystem;
+
+$estimator->results()->toJSON()->saveTo(new Filesystem('results.json'));
+```
 
 ### Saving the Model
 
@@ -186,7 +221,7 @@ $estimator = new PersistentModel($estimator->base(), new Filesystem('model.rbx')
 $estimator->save();
 ```
 
-Together, the training script produces three artifacts: `training.csv` and `testing.csv`, which hold the stratified train/test split we exported earlier, and `model.rbx`, which holds the trained Logit Boost model parameters. Keeping the split on disk means we can re-score the saved model at any time without having to train again - which is exactly what we'll do in the next section.
+Together, the training script produces four artifacts: `training.csv` and `testing.csv`, which hold the stratified train/test split we exported earlier, `results.json`, which holds the per-trial search scores, and `model.rbx`, which holds the trained Logit Boost model parameters. Keeping the split on disk means we can re-score the saved model at any time without having to train again - which is exactly what we'll do in the next section.
 
 ### Validating the Model
 
@@ -430,7 +465,7 @@ Voila! You've identified the customers that may be at risk of churning. Let's ta
 
 - Training with a different subset of the features. Are some features more predictive than others?
 - How does the learning rate and the maximum number of epochs effect the predictions?
-- Widening the grid search - would a larger search space, or a different validator or scoring metric, find even better hyper-parameters?
+- Raising `maxTrials`, or widening the search space - would a larger or better-scoped hyper-parameter space let Bayesian Search find even better hyper-parameters?
 - Swapping Logit Boost for another classifier such as [Random Forest](https://rubixml.github.io/ML/3.0/classifiers/random-forest.html) or [Naive Bayes](https://rubixml.github.io/ML/3.0/classifiers/naive-bayes.html).
 
 ## Original Dataset
